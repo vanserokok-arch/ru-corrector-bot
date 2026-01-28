@@ -1,4 +1,5 @@
 """Russian text corrector package."""
+
 from .config import config
 from .services import correct_text
 

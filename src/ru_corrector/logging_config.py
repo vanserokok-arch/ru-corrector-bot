@@ -1,9 +1,9 @@
 """Structured logging configuration for ru-corrector service."""
+
 import logging
 import sys
 import uuid
 from contextvars import ContextVar
-from typing import Any
 
 from .config import config
 
@@ -25,23 +25,23 @@ def setup_logging() -> None:
         "%(asctime)s | %(levelname)-8s | %(request_id)s | "
         "%(name)s:%(funcName)s:%(lineno)d | %(message)s"
     )
-    
+
     # Create formatter
     formatter = logging.Formatter(log_format)
-    
+
     # Configure root logger
     root_logger = logging.getLogger()
     root_logger.setLevel(getattr(logging, config.LOG_LEVEL))
-    
+
     # Remove existing handlers
     root_logger.handlers.clear()
-    
+
     # Add console handler
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
     console_handler.addFilter(RequestIdFilter())
     root_logger.addHandler(console_handler)
-    
+
     # Reduce noise from third-party libraries
     logging.getLogger("urllib3").setLevel(logging.WARNING)
     logging.getLogger("aiogram").setLevel(logging.INFO)

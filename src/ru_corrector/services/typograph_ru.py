@@ -1,7 +1,8 @@
 """Russian typography rules."""
+
 import re
 
-NBSP = "\u00A0"
+NBSP = "\u00a0"
 
 
 def typograph(text: str) -> str:
@@ -17,10 +18,7 @@ def typograph(text: str) -> str:
     # % and units
     t = re.sub(r"(\d)\s*%", rf"\1{NBSP}%", t)
     t = re.sub(
-        r"(\d)\s+(кг|г|м|км|см|мм|л|мл|шт|тыс\.|млн|млрд)",
-        rf"\1{NBSP}\2",
-        t,
-        flags=re.IGNORECASE
+        r"(\d)\s+(кг|г|м|км|см|мм|л|мл|шт|тыс\.|млн|млрд)", rf"\1{NBSP}\2", t, flags=re.IGNORECASE
     )
     # № and references like ст. 10, п. 3, г. 2025
     t = re.sub(r"№\s*(\d)", rf"№{NBSP}\1", t)

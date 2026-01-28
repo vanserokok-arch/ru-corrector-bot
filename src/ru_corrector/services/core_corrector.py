@@ -1,8 +1,7 @@
 """Core text correction logic using LanguageTool."""
-import re
-from typing import Literal, Tuple, Union
 
-from language_tool_python import LanguageToolPublicAPI
+import re
+from typing import Literal
 
 from ..config import config
 from ..logging_config import get_logger
@@ -12,15 +11,27 @@ logger = get_logger(__name__)
 
 Mode = Literal["min", "biz", "acad"]
 
-NBSP = "\u00A0"
+NBSP = "\u00a0"
 
-# Initialize LanguageTool client
-lt = LanguageToolPublicAPI(language="ru-RU", api_url=config.LT_URL)
+# Lazy initialization of LanguageTool client to avoid initialization errors in tests
+_lt = None
+
+
+def _get_languagetool():
+    """Get or initialize LanguageTool client."""
+    global _lt
+    if _lt is None:
+        # LanguageToolPublicAPI already sets remote_server, so we just override it
+        # by using base LanguageTool class with remote_server parameter
+        from language_tool_python import LanguageTool
+
+        _lt = LanguageTool(language="ru-RU", remote_server=config.LT_URL)
+    return _lt
 
 
 def normalize(text: str) -> str:
     """Normalize whitespace and line breaks."""
-    t = text.replace("\u00A0", " ")
+    t = text.replace("\u00a0", " ")
     t = re.sub(r"[ \t]+", " ", t)
     t = re.sub(r" ?\n ?", "\n", t)
     return t.strip()
@@ -40,9 +51,10 @@ def quotes_and_dashes(text: str) -> str:
 def apply_languagetool(text: str) -> str:
     """Apply LanguageTool corrections to text."""
     logger.debug("Checking text with LanguageTool")
+    lt = _get_languagetool()
     matches = lt.check(text)
     corrections = []
-    
+
     for m in matches.matches:
         if not m.replacements:
             continue
@@ -75,11 +87,8 @@ def style_refine(text: str, mode: Mode) -> str:
 
 
 def correct_text(
-    text: str,
-    mode: Mode = "min",
-    do_typograph: bool = True,
-    make_diff_view: bool = False
-) -> Union[str, Tuple[str, str]]:
+    text: str, mode: Mode = "min", do_typograph: bool = True, make_diff_view: bool = False
+) -> str | tuple[str, str]:
     """
     Main correction pipeline:
     1) Normalize whitespace
@@ -88,18 +97,18 @@ def correct_text(
     4) Typography (non-breaking spaces, ellipsis, etc.)
     5) (optional) Style refinement
     6) (optional) Return HTML diff
-    
+
     Args:
         text: Input text to correct
         mode: Correction mode (min/biz/acad)
         do_typograph: Apply typography rules
         make_diff_view: Return tuple with (corrected_text, html_diff)
-    
+
     Returns:
         Corrected text or tuple of (corrected_text, html_diff)
     """
     logger.info(f"Starting correction in mode: {mode}, length: {len(text)}")
-    
+
     src = normalize(text)
     lt_fixed = apply_languagetool(src)
     rule_fixed = quotes_and_dashes(lt_fixed)
@@ -109,8 +118,9 @@ def correct_text(
         final = style_refine(final, mode)
 
     logger.info("Correction completed")
-    
+
     if make_diff_view:
         from .diff_view import make_diff
+
         return final, make_diff(src, final)
     return final
