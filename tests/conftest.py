@@ -12,10 +12,12 @@ def mock_languagetool(monkeypatch):
     class MockMatch:
         """Mock LanguageTool match."""
 
-        def __init__(self, offset, length, replacements):
+        def __init__(self, offset, length, replacements, message="", rule_id=""):
             self.offset = offset
             self.errorLength = length
             self.replacements = [Mock(value=r) for r in replacements]
+            self.message = message
+            self.ruleId = rule_id
 
     class MockMatches:
         """Mock LanguageTool matches."""
@@ -40,9 +42,17 @@ def mock_languagetool(monkeypatch):
     def mock_get_lt():
         return mock_lt
 
-    # Patch the module
-    import ru_corrector.services.core_corrector as corrector_module
-
-    monkeypatch.setattr(corrector_module, "_get_languagetool", mock_get_lt)
+    # Patch both the old and new modules
+    try:
+        import ru_corrector.services.core_corrector as old_corrector
+        monkeypatch.setattr(old_corrector, "_get_languagetool", mock_get_lt)
+    except (ImportError, AttributeError):
+        pass
+    
+    try:
+        import ru_corrector.providers.languagetool as lt_provider
+        monkeypatch.setattr(lt_provider, "_get_languagetool", mock_get_lt)
+    except (ImportError, AttributeError):
+        pass
 
     return mock_lt
