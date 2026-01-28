@@ -1,0 +1,19 @@
+version: '3.9'
+services:
+  lt-server:
+    image: languagetoolorg/languagetool:latest
+    container_name: lt-server
+    ports:
+      - "8010:8010"
+    environment:
+      - Java_Xms=128m
+      - Java_Xmx=1024m
+    command: ["/bin/sh","-c","java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8010 --allow-origin '*' --languageModel /ngrams || java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8010 --allow-origin '*'"]
+
+  bot:
+    build: .
+    container_name: ru-corrector-bot
+    env_file: .env
+    depends_on:
+      - lt-server
+    restart: unless-stopped
