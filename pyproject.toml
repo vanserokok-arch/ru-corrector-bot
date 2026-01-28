@@ -9,9 +9,9 @@ description = "Russian text correction service with LanguageTool and typography 
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.104.0",
+    "fastapi>=0.109.2",
     "uvicorn[standard]>=0.24.0",
-    "pydantic>=2.0.0",
+    "pydantic>=2.4.1,<2.6",  # Compatible with aiogram 3.4.1
     "language-tool-python>=2.7.0",
     "python-dotenv>=1.0.0",
     # Optional: Keep aiogram for Telegram bot compatibility
