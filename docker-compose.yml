@@ -1,4 +1,5 @@
 version: '3.9'
+
 services:
   lt-server:
     image: languagetoolorg/languagetool:latest
@@ -6,14 +7,32 @@ services:
     ports:
       - "8010:8010"
     environment:
-      - Java_Xms=128m
+      - Java_Xms=256m
       - Java_Xmx=1024m
     command: ["/bin/sh","-c","java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8010 --allow-origin '*' --languageModel /ngrams || java -cp languagetool-server.jar org.languagetool.server.HTTPServer --port 8010 --allow-origin '*'"]
-
-  bot:
-    build: .
-    container_name: ru-corrector-bot
-    env_file: .env
-    depends_on:
-      - lt-server
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8010/v2/languages"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     restart: unless-stopped
+
+  api:
+    build: .
+    container_name: ru-corrector-api
+    ports:
+      - "8000:8000"
+    env_file: .env
+    environment:
+      - LT_URL=http://lt-server:8010
+    depends_on:
+      lt-server:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

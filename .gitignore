@@ -1,7 +1,50 @@
+# macOS
 __MACOSX/
+.DS_Store
+
+# Environment
 .env
+.env.*
+!.env.example
+
+# Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+*.whl
 .venv/
-.env.*
-.DS_Store
+venv/
+ENV/
+env/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.bak
+diff.html
+

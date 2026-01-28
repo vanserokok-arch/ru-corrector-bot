@@ -1,5 +1,6 @@
-aiogram==3.4.1
-language-tool-python==2.7
-pymorphy3==2.0.2
-rapidfuzz==3.9.3
+fastapi==0.109.2
+uvicorn[standard]==0.24.0
+pydantic==2.5.3
+language-tool-python==2.7.1
 python-dotenv==1.0.1
+aiogram==3.4.1
