@@ -1,18 +1,52 @@
 # ru-corrector — Russian Text Correction Service
 
-Production-ready Russian text correction service using LanguageTool and custom typography rules.
+Production-ready Russian text correction service with clean layered architecture: FastAPI API layer, correction engine, provider layer, and optional Telegram bot.
 
 ## Features
 
+- ✅ **Layered Architecture**: Clean separation between API, engine, and providers
 - ✅ **Spelling & Grammar**: Powered by LanguageTool
+- ✅ **Legal Document Formatting**: Russian quotes («»), em-dashes (—), proper spacing
 - ✅ **Typography**: Russian typography rules (quotes, dashes, spaces, ellipsis)
+- ✅ **Multiple Modes**: Base, Legal, Strict correction modes
 - ✅ **FastAPI**: Modern async API with automatic documentation
-- ✅ **Multiple Modes**: Minimal, Business, Academic correction styles
-- ✅ **Diff View**: HTML diff showing changes
+- ✅ **Telegram Bot**: Optional standalone bot (run separately)
 - ✅ **Docker Ready**: Production-ready containerized deployment
 - ✅ **Structured Logging**: Request tracking and performance monitoring
 - ✅ **Health Checks**: Built-in health monitoring
-- ✅ **Tested**: Comprehensive unit and integration tests
+- ✅ **Tested**: Comprehensive unit and integration tests (65 tests)
+
+## Architecture
+
+```
+ru-corrector-bot/
+├── src/ru_corrector/
+│   ├── api/                    # API layer
+│   │   ├── schemas.py          # Request/response models
+│   │   └── __init__.py
+│   ├── core/                   # Core engine layer
+│   │   ├── engine.py           # Main correction pipeline
+│   │   ├── models.py           # Internal data models
+│   │   └── __init__.py
+│   ├── providers/              # Provider layer
+│   │   ├── languagetool.py     # LanguageTool adapter
+│   │   ├── mock.py             # Mock provider for testing
+│   │   └── __init__.py
+│   ├── telegram/               # Telegram bot (optional)
+│   │   ├── bot.py              # Bot implementation
+│   │   └── __init__.py
+│   ├── app.py                  # FastAPI application
+│   ├── config.py               # Configuration (Pydantic Settings)
+│   └── logging_config.py       # Logging setup
+├── tests/                      # Test suite
+│   ├── test_api.py            # API endpoint tests
+│   ├── test_engine.py         # Core engine tests
+│   ├── test_core_corrector.py # Legacy tests
+│   └── test_typograph.py      # Typography tests
+├── pyproject.toml             # Project configuration
+├── .env.example               # Environment variables template
+└── README.md
+```
 
 ## Quick Start
 
@@ -38,36 +72,34 @@ docker-compose up -d
 
 ### Local Development
 
-1. Install Python 3.11+:
+1. **Install Python 3.11+**:
 ```bash
 python --version  # Should be 3.11 or higher
 ```
 
-2. Create virtual environment:
+2. **Create virtual environment**:
 ```bash
 python -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 ```
 
-3. Install dependencies:
+3. **Install in editable mode**:
 ```bash
-pip install -r requirements.txt
+pip install -e .
 ```
 
-4. Set up environment variables:
+4. **Set up environment variables**:
 ```bash
 cp .env.example .env
 # Edit .env and set LT_URL to public API or local server
 ```
 
-5. Run the service:
+5. **Run the service**:
 ```bash
-python -m uvicorn ru_corrector.app:app --reload --host 0.0.0.0 --port 8000
-```
+# Using uvicorn with app-dir (preserves import structure)
+python -m uvicorn --app-dir src ru_corrector.app:app --host 127.0.0.1 --port 8000 --reload
 
-Or using the module directly:
-```bash
-cd src
+# Or directly
 python -m ru_corrector.app
 ```
 
@@ -85,7 +117,7 @@ Once running, visit:
 curl http://localhost:8000/health
 ```
 
-Response:
+**Response:**
 ```json
 {
   "status": "ok",
@@ -95,7 +127,7 @@ Response:
 
 ### Text Correction
 
-**Basic correction:**
+#### Basic correction (legal mode by default):
 ```bash
 curl -X POST http://localhost:8000/correct \
   -H "Content-Type: application/json" \
@@ -104,49 +136,108 @@ curl -X POST http://localhost:8000/correct \
   }'
 ```
 
-**With diff view:**
-```bash
-curl -X POST http://localhost:8000/correct \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Простой текст с ошибками...",
-    "show_diff": true
-  }'
-```
-
-**Different modes:**
-```bash
-curl -X POST http://localhost:8000/correct \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Деловой текст для проверки",
-    "mode": "biz"
-  }'
-```
-
-Available modes:
-- `min` - Minimal corrections (spelling, grammar, punctuation)
-- `biz` - Business style (gentle corrections)
-- `acad` - Academic style (gentle corrections)
-
-### Response Format
-
+**Response:**
 ```json
 {
-  "original": "Он сказал \"привет\" и ушел...",
-  "corrected": "Он сказал «привет» и ушёл…",
-  "diff": "<html diff or null>",
+  "result": "Он сказал «привет» и ушёл… Это случилось в г.\u00a02025",
+  "edits": [
+    {
+      "offset": 10,
+      "length": 8,
+      "original": "\"привет\"",
+      "replacement": "«привет»",
+      "message": "Convert to Russian quotes"
+    }
+  ],
   "stats": {
-    "length": 28,
-    "changes": 5,
-    "processing_time_ms": 234.56
+    "chars_count": 52,
+    "edits_count": 3,
+    "processing_time_ms": 123.45
   }
 }
 ```
 
+#### Different modes:
+
+**Base mode** (LanguageTool only):
+```bash
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Простой текст с ошибками",
+    "mode": "base"
+  }'
+```
+
+**Legal mode** (default - LanguageTool + legal formatting):
+```bash
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Договор \"купли-продажи\" от 01.01.2026",
+    "mode": "legal"
+  }'
+```
+
+**Strict mode** (legal + aggressive normalization):
+```bash
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Текст   с   пробелами.\n\n\n\nНовая строка",
+    "mode": "strict"
+  }'
+```
+
+#### Without edits list:
+```bash
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{
+    "text": "Простой текст",
+    "return_edits": false
+  }'
+```
+
+### Correction Modes
+
+| Mode | Description | Features |
+|------|-------------|----------|
+| `base` | Minimal corrections | LanguageTool only (spelling, grammar, punctuation) |
+| `legal` | Legal document formatting (default) | Base + Russian quotes, em-dashes, proper spacing, abbreviation handling |
+| `strict` | Aggressive normalization | Legal + strict whitespace/punctuation normalization |
+
+## Telegram Bot (Optional)
+
+The Telegram bot runs **separately** from the API and uses the same correction engine.
+
+### Setup
+
+1. Get your bot token from [@BotFather](https://t.me/botfather)
+
+2. Set the token in `.env`:
+```bash
+TG_BOT_TOKEN=your_bot_token_here
+```
+
+3. Run the bot:
+```bash
+python -m ru_corrector.telegram.bot
+```
+
+### Bot Commands
+
+- `/start` or `/help` - Show help
+- `/base <text>` - Base mode correction
+- `/legal <text>` - Legal mode correction (default)
+- `/strict <text>` - Strict mode correction
+- Send text without command - Uses default mode (legal)
+
 ## Configuration
 
-All configuration is done via environment variables. See `.env.example` for all options:
+All configuration is done via environment variables (`.env` file or environment).
+
+See `.env.example` for all options:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -157,14 +248,17 @@ All configuration is done via environment variables. See `.env.example` for all 
 | `MAX_TEXT_LEN` | `15000` | Maximum text length |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `LT_URL` | `https://api.languagetool.org` | LanguageTool server URL |
+| `ENABLE_YO_REPLACEMENT` | `false` | Enable ё replacement (experimental) |
+| `TG_BOT_TOKEN` | - | Telegram bot token (optional) |
+| `DEFAULT_MODE` | `legal` | Default correction mode for Telegram bot |
 
 ## Testing
 
-Run the test suite:
+### Run All Tests
 
 ```bash
 # Install dev dependencies
-pip install pytest pytest-asyncio httpx
+pip install -e ".[dev]"
 
 # Run all tests
 pytest
@@ -174,18 +268,55 @@ pytest -v
 
 # Run specific test file
 pytest tests/test_api.py
-
-# Run with coverage
-pytest --cov=src/ru_corrector
+pytest tests/test_engine.py
 ```
 
-## Code Quality
+### Test Coverage
+
+The project has 65+ tests covering:
+- API endpoints (health, correct, validation, error handling)
+- Core engine (normalization, edit application, deduplication)
+- Legal rules (quotes, dashes, spacing, abbreviations)
+- Strict rules (whitespace, punctuation)
+- Typography (ellipsis, units, NBSP)
+- Correction modes (base, legal, strict)
+- Deterministic behavior
+
+**All tests are fast** - no external API calls are made (LanguageTool is mocked).
+
+### Smoke Tests
+
+Quick manual tests to verify everything works:
+
+```bash
+# 1. Health check
+curl http://localhost:8000/health
+
+# 2. Basic correction
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Простой текст"}'
+
+# 3. Legal mode with quotes
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Он сказал \"привет\"", "mode": "legal"}'
+
+# 4. Check edits are returned
+curl -X POST http://localhost:8000/correct \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Текст \"в кавычках\"", "return_edits": true}' | jq '.edits'
+```
+
+## Development
+
+### Code Quality
 
 The project uses modern Python tooling:
 
 ```bash
 # Install dev tools
-pip install ruff black mypy
+pip install -e ".[dev]"
 
 # Format code
 black src/ tests/
@@ -197,33 +328,34 @@ ruff check src/ tests/
 mypy src/
 ```
 
-## Project Structure
+### Project Structure
 
+- **API Layer** (`src/ru_corrector/api/`): Request/response schemas, API contracts
+- **Core Layer** (`src/ru_corrector/core/`): Correction engine, text processing pipeline
+- **Provider Layer** (`src/ru_corrector/providers/`): LanguageTool adapter, provider interface
+- **Telegram Layer** (`src/ru_corrector/telegram/`): Optional Telegram bot
+- **Configuration** (`config.py`): Pydantic Settings-based configuration
+- **Logging** (`logging_config.py`): Structured logging with request IDs
+
+### Adding a New Provider
+
+1. Create a new file in `src/ru_corrector/providers/`
+2. Implement the `CorrectionProvider` interface:
+```python
+from ru_corrector.providers import CorrectionProvider
+from ru_corrector.core.models import TextEdit
+
+class MyProvider(CorrectionProvider):
+    def check(self, text: str) -> list[TextEdit]:
+        # Your implementation
+        return []
 ```
-ru-corrector-bot/
-├── src/
-│   └── ru_corrector/
-│       ├── __init__.py
-│       ├── app.py              # FastAPI application
-│       ├── config.py           # Configuration from ENV
-│       ├── logging_config.py   # Structured logging
-│       └── services/
-│           ├── __init__.py
-│           ├── core_corrector.py   # Main correction logic
-│           ├── typograph_ru.py     # Typography rules
-│           └── diff_view.py        # HTML diff generator
-├── tests/
-│   ├── __init__.py
-│   ├── test_api.py
-│   ├── test_core_corrector.py
-│   └── test_typograph.py
-├── Dockerfile
-├── docker-compose.yml
-├── pyproject.toml
-├── requirements.txt
-├── .env.example
-├── .gitignore
-└── README.md
+3. Use it in the engine:
+```python
+from ru_corrector.core.engine import CorrectionEngine
+from my_provider import MyProvider
+
+engine = CorrectionEngine(provider=MyProvider())
 ```
 
 ## Deployment
@@ -261,14 +393,44 @@ docker-compose down
 4. **Monitoring**: Integrate with monitoring tools (Prometheus, Grafana, etc.)
 5. **Reverse Proxy**: Use nginx or similar for SSL/TLS termination
 
-## Telegram Bot (Legacy)
+## How to Run
 
-The original Telegram bot functionality is preserved but separated. To run the bot:
+### Quick Start (Development)
 
-1. Set `BOT_TOKEN` in your `.env` file
-2. Run the legacy bot script (if maintained separately)
+```bash
+# 1. Clone and setup
+git clone https://github.com/vanserokok-arch/ru-corrector-bot.git
+cd ru-corrector-bot
+python -m venv .venv
+source .venv/bin/activate
 
-The API is designed to be easily integrated with any Telegram bot or other clients.
+# 2. Install
+pip install -e .
+
+# 3. Run API
+python -m uvicorn --app-dir src ru_corrector.app:app --host 127.0.0.1 --port 8000 --reload
+
+# 4. In another terminal, run tests
+pytest
+```
+
+### Production
+
+```bash
+# 1. Clone and setup
+git clone https://github.com/vanserokok-arch/ru-corrector-bot.git
+cd ru-corrector-bot
+
+# 2. Configure
+cp .env.example .env
+# Edit .env with production settings
+
+# 3. Deploy with Docker
+docker-compose up -d
+
+# 4. Verify
+curl http://localhost:8000/health
+```
 
 ## License
 
@@ -281,8 +443,9 @@ Contributions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch
 3. Write tests for new functionality
-4. Ensure all tests pass
-5. Submit a pull request
+4. Ensure all tests pass (`pytest`)
+5. Format code (`black src/ tests/`)
+6. Submit a pull request
 
 ## Support
 
