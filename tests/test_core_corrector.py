@@ -1,6 +1,5 @@
 """Tests for core correction logic."""
 
-
 from ru_corrector.services.core_corrector import (
     apply_languagetool,
     correct_text,
@@ -104,9 +103,10 @@ class TestLanguageTool:
         assert isinstance(result, str)
 
     def test_apply_languagetool_with_error(self):
-        """Test LanguageTool with intentional error."""
-        # This test might be flaky depending on LanguageTool availability
-        # In production, you might want to mock the API
+        """Test LanguageTool with intentional error.
+
+        Note: LanguageTool is mocked in conftest.py to avoid external API calls.
+        """
         text = "Привет мир"
         result = apply_languagetool(text)
         assert isinstance(result, str)

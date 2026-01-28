@@ -159,9 +159,7 @@ async def correct_endpoint(request: CorrectionRequest):
 
     except Exception as e:
         logger.error(f"Error during correction: {e}", exc_info=True)
-        raise HTTPException(
-            status_code=500, detail="Error processing text correction"
-        ) from e
+        raise HTTPException(status_code=500, detail="Error processing text correction") from e
 
 
 if __name__ == "__main__":

@@ -1,6 +1,5 @@
 """Tests for typography rules."""
 
-
 from ru_corrector.services.typograph_ru import NBSP, typograph
 
 

@@ -1,6 +1,6 @@
 """Tests for FastAPI endpoints."""
 
-from starlette.testclient import TestClient
+from fastapi.testclient import TestClient
 
 from ru_corrector.app import app
 

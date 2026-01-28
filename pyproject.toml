@@ -22,6 +22,8 @@ dependencies = [
 dev = [
     "pytest>=7.4.0",
     "pytest-asyncio>=0.21.0",
+    # httpx version pinned below 0.28.0 due to breaking changes in TestClient API
+    # See: https://github.com/encode/httpx/issues/2963
     "httpx>=0.25.0,<0.28.0",
     "ruff>=0.1.0",
     "black>=23.0.0",
@@ -70,6 +72,7 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
+"telegram_bot.py" = ["E402"]  # Module imports after sys.path modification
 
 [tool.mypy]
 python_version = "3.11"
