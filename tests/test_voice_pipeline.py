@@ -42,8 +42,9 @@ class TestVoicePipeline:
     @pytest.fixture(autouse=True)
     def setup_env(self, monkeypatch):
         """Set up environment variables."""
+        # Set a valid-looking Telegram bot token (format: 123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11)
+        monkeypatch.setenv("BOT_TOKEN", "123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789")
         monkeypatch.setenv("OPENAI_API_KEY", "test-key-123")
-        monkeypatch.setenv("BOT_TOKEN", "test-bot-token")
         monkeypatch.setenv("DEFAULT_MODE", "min")
 
     @pytest.mark.asyncio
