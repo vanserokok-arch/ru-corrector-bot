@@ -1,0 +1,22 @@
+[Unit]
+Description=Russian Text Corrector Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/ru-corrector-bot
+EnvironmentFile=/opt/ru-corrector-bot/.env
+ExecStart=/opt/ru-corrector-bot/.venv/bin/python3 /opt/ru-corrector-bot/app.py
+Restart=always
+RestartSec=10
+StandardOutput=append:/var/log/ru-corrector-bot/bot.log
+StandardError=append:/var/log/ru-corrector-bot/error.log
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
