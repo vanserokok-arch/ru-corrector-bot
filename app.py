@@ -3,9 +3,11 @@ import asyncio
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile
 from dotenv import load_dotenv
+from pathlib import Path
 from core_corrector import correct_text
 
-load_dotenv()
+# Load .env from project root
+load_dotenv(dotenv_path=Path(__file__).resolve().parent / ".env")
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 DEFAULT_MODE = os.getenv("DEFAULT_MODE", "min")
 

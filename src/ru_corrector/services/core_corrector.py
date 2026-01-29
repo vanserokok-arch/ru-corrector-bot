@@ -25,7 +25,7 @@ def _get_languagetool():
         # by using base LanguageTool class with remote_server parameter
         from language_tool_python import LanguageTool
 
-        _lt = LanguageTool(language="ru-RU", remote_server=config.LT_URL)
+        _lt = LanguageTool(language=config.LT_LANGUAGE, remote_server=config.LT_URL)
     return _lt
 
 
