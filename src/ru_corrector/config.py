@@ -34,6 +34,9 @@ class Config(BaseSettings):
     LT_URL: str = Field(
         default="https://api.languagetool.org", description="LanguageTool server URL"
     )
+    LT_LANGUAGE: str = Field(
+        default="ru-RU", description="LanguageTool language code"
+    )
 
     # Correction options
     ENABLE_YO_REPLACEMENT: bool = Field(

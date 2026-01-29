@@ -19,8 +19,8 @@ def _get_languagetool():
     if _lt is None:
         from language_tool_python import LanguageTool
 
-        logger.debug(f"Initializing LanguageTool with server: {config.LT_URL}")
-        _lt = LanguageTool(language="ru-RU", remote_server=config.LT_URL)
+        logger.debug(f"Initializing LanguageTool with server: {config.LT_URL}, language: {config.LT_LANGUAGE}")
+        _lt = LanguageTool(language=config.LT_LANGUAGE, remote_server=config.LT_URL)
     return _lt
 
 

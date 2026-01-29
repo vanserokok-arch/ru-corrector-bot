@@ -6,13 +6,19 @@ Run separately from the API: python -m ru_corrector.telegram.bot
 """
 
 import asyncio
+import atexit
 import os
+import signal
 import sys
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message
 from dotenv import load_dotenv
+
+# Load .env from project root
+env_path = Path(__file__).resolve().parent.parent.parent.parent / ".env"
+load_dotenv(dotenv_path=env_path)
 
 from ..config import config
 from ..core.engine import CorrectionEngine
@@ -22,15 +28,69 @@ from ..logging_config import get_logger, setup_logging
 setup_logging()
 logger = get_logger(__name__)
 
-# Load environment
-load_dotenv()
-
 # Get bot token - try new TG_BOT_TOKEN first, then fall back to legacy BOT_TOKEN
 BOT_TOKEN = config.TG_BOT_TOKEN or config.BOT_TOKEN
 
 if not BOT_TOKEN:
     logger.error("TG_BOT_TOKEN (or BOT_TOKEN) not set in environment")
     sys.exit(1)
+
+# Lock file for preventing multiple instances
+LOCK_FILE = Path("/tmp/ru-corrector-bot.lock")
+
+
+def acquire_lock():
+    """Acquire lock file to prevent multiple bot instances."""
+    if LOCK_FILE.exists():
+        try:
+            with open(LOCK_FILE, "r") as f:
+                pid = int(f.read().strip())
+            # Check if process is still running
+            try:
+                os.kill(pid, 0)  # Send signal 0 to check if process exists
+                logger.error(f"Another instance is already running (PID: {pid}), exiting.")
+                sys.exit(1)
+            except OSError:
+                # Process doesn't exist, remove stale lock
+                logger.warning(f"Removing stale lock file (PID {pid} not found)")
+                LOCK_FILE.unlink()
+        except (ValueError, FileNotFoundError):
+            # Invalid lock file, remove it
+            logger.warning("Removing invalid lock file")
+            if LOCK_FILE.exists():
+                LOCK_FILE.unlink()
+    
+    # Create lock file with current PID
+    try:
+        with open(LOCK_FILE, "w") as f:
+            f.write(str(os.getpid()))
+        logger.info(f"Lock file created: {LOCK_FILE}")
+    except Exception as e:
+        logger.error(f"Failed to create lock file: {e}")
+        sys.exit(1)
+
+
+def release_lock():
+    """Release lock file on exit."""
+    try:
+        if LOCK_FILE.exists():
+            LOCK_FILE.unlink()
+            logger.info("Lock file removed")
+    except Exception as e:
+        logger.warning(f"Failed to remove lock file: {e}")
+
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals."""
+    logger.info(f"Received signal {signum}, shutting down...")
+    release_lock()
+    sys.exit(0)
+
+
+# Register cleanup handlers
+atexit.register(release_lock)
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
 
 bot = Bot(BOT_TOKEN)
 dp = Dispatcher()
@@ -109,6 +169,44 @@ async def default_handler(msg: Message):
     await msg.reply(fixed or "(пусто)")
 
 
+async def get_bot_info():
+    """Get bot information for diagnostic logging."""
+    try:
+        me = await bot.get_me()
+        return me.username
+    except Exception as e:
+        logger.error(f"Failed to get bot info: {e}")
+        return "unknown"
+
+
+async def main():
+    """Main bot startup."""
+    # Acquire lock before starting
+    acquire_lock()
+    
+    # Get bot info
+    bot_username = await get_bot_info()
+    
+    # Diagnostic logging
+    logger.info("="*50)
+    logger.info("Telegram Bot Starting")
+    logger.info("="*50)
+    logger.info(f"Bot Username: @{bot_username}")
+    logger.info(f"LT_URL: {config.LT_URL}")
+    logger.info(f"LT_LANGUAGE: {config.LT_LANGUAGE}")
+    logger.info(f"MAX_TEXT_LEN: {config.MAX_TEXT_LEN}")
+    logger.info(f"DEFAULT_MODE: {config.DEFAULT_MODE}")
+    logger.info("="*50)
+    
+    # Start polling
+    logger.info("Starting polling...")
+    await dp.start_polling(bot)
+
+
 if __name__ == "__main__":
-    logger.info("Starting Telegram bot...")
-    asyncio.run(dp.start_polling(bot))
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot stopped by user")
+    finally:
+        release_lock()

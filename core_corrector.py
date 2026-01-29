@@ -8,11 +8,12 @@ from diff_view import make_diff
 
 Mode = Literal["min", "biz", "acad"]
 
-# LT_URL можно задать в .env (например: http://lt-server:8010)
+# LT_URL и LT_LANGUAGE можно задать в .env
 LT_URL = os.getenv("LT_URL", "https://api.languagetool.org")
+LT_LANGUAGE = os.getenv("LT_LANGUAGE", "ru-RU")
 
 # LanguageToolPublicAPI сам добавит /v2 к base URL
-lt = LanguageToolPublicAPI(language="ru-RU", api_url=LT_URL)
+lt = LanguageToolPublicAPI(language=LT_LANGUAGE, api_url=LT_URL)
 
 NBSP = "\u00A0"
 
