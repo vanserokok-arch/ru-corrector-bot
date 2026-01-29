@@ -89,7 +89,8 @@ def signal_handler(signum, frame):
     """Handle shutdown signals."""
     logger.info(f"Received signal {signum}, shutting down...")
     release_lock()
-    sys.exit(0)
+    # Don't call sys.exit() here - let the process terminate naturally
+    # The signal will terminate the process after this handler returns
 
 
 # Register cleanup handlers
@@ -194,9 +195,6 @@ async def get_bot_info():
 
 async def main():
     """Main bot startup."""
-    # Acquire lock before starting
-    acquire_lock()
-    
     # Get bot info
     bot_username = await get_bot_info()
     
@@ -217,6 +215,9 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Acquire lock before starting async runtime to avoid race conditions
+    acquire_lock()
+    
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
