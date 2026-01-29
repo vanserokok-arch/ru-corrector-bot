@@ -1,15 +1,15 @@
 """FastAPI application for Russian text correction service."""
 
 import time
-from typing import Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import field_validator
 
+from .api.schemas import CorrectionRequest, CorrectionResponse, Edit, HealthResponse, Stats
 from .config import config
+from .core.engine import CorrectionEngine
 from .logging_config import get_logger, set_request_id, setup_logging
-from .services.core_corrector import correct_text
 
 # Setup logging
 setup_logging()
@@ -23,47 +23,22 @@ app = FastAPI(
     debug=config.DEBUG,
 )
 
-
-class CorrectionRequest(BaseModel):
-    """Request model for text correction."""
-
-    text: str = Field(..., description="Text to correct", min_length=1)
-    show_diff: bool = Field(default=False, description="Return HTML diff view")
-    mode: Literal["min", "biz", "acad"] = Field(
-        default="min", description="Correction mode: min (minimal), biz (business), acad (academic)"
-    )
-
-    @field_validator("text")
-    @classmethod
-    def validate_text_length(cls, v: str) -> str:
-        """Validate text length."""
-        if len(v) > config.MAX_TEXT_LEN:
-            raise ValueError(f"Text too long. Maximum length is {config.MAX_TEXT_LEN} characters")
-        return v
+# Initialize correction engine
+engine = CorrectionEngine()
 
 
-class CorrectionStats(BaseModel):
-    """Statistics about the correction."""
-
-    length: int = Field(..., description="Length of corrected text")
-    changes: int = Field(..., description="Number of changes made")
-    processing_time_ms: float = Field(..., description="Processing time in milliseconds")
-
-
-class CorrectionResponse(BaseModel):
-    """Response model for text correction."""
-
-    original: str = Field(..., description="Original text")
-    corrected: str = Field(..., description="Corrected text")
-    diff: str | None = Field(None, description="HTML diff view if requested")
-    stats: CorrectionStats = Field(..., description="Correction statistics")
+# Add validation to request model
+def validate_text_length(v: str) -> str:
+    """Validate text length."""
+    if len(v) > config.MAX_TEXT_LEN:
+        raise ValueError(f"Text too long. Maximum length is {config.MAX_TEXT_LEN} characters")
+    return v
 
 
-class HealthResponse(BaseModel):
-    """Health check response."""
-
-    status: str = Field(..., description="Service status")
-    version: str = Field(..., description="Service version")
+# Patch the request model with validation
+CorrectionRequest.model_fields["text"].metadata = [
+    field_validator("text")(classmethod(validate_text_length))
+]
 
 
 @app.middleware("http")
@@ -76,7 +51,7 @@ async def add_request_id_middleware(request: Request, call_next):
     response = await call_next(request)
     duration = (time.time() - start_time) * 1000
 
-    logger.info(f"{request.method} {request.url.path} - {response.status_code} - {duration:.2f}ms")
+    logger.debug(f"{request.method} {request.url.path} - {response.status_code} - {duration:.2f}ms")
 
     response.headers["X-Request-ID"] = request_id
     return response
@@ -117,45 +92,56 @@ async def correct_endpoint(request: CorrectionRequest):
     """
     Correct Russian text.
 
-    Applies LanguageTool corrections, custom typography rules, and optional styling.
+    Applies LanguageTool corrections, custom typography rules, and mode-specific formatting.
 
     - **text**: Text to correct (required, max 15000 characters)
-    - **show_diff**: Return HTML diff view (optional, default: false)
-    - **mode**: Correction mode - min/biz/acad (optional, default: min)
+    - **mode**: Correction mode - base/legal/strict (optional, default: legal)
+      - base: LanguageTool only
+      - legal: LanguageTool + legal document formatting (quotes, dashes, abbreviations)
+      - strict: legal + aggressive normalization
+    - **return_edits**: Return list of edits (optional, default: true)
 
-    Returns corrected text with statistics.
+    Returns corrected text with edits and statistics.
     """
     logger.info(
         f"Correction request: mode={request.mode}, "
-        f"text_length={len(request.text)}, show_diff={request.show_diff}"
+        f"text_length={len(request.text)}, return_edits={request.return_edits}"
     )
 
     start_time = time.time()
 
     try:
-        if request.show_diff:
-            corrected, diff_html = correct_text(
-                request.text, mode=request.mode, do_typograph=True, make_diff_view=True
-            )
-        else:
-            corrected = correct_text(
-                request.text, mode=request.mode, do_typograph=True, make_diff_view=False
-            )
-            diff_html = None
+        # Run correction engine
+        corrected_text, edits = engine.correct(request.text, mode=request.mode)
 
         processing_time = (time.time() - start_time) * 1000
 
-        # Calculate number of changes (simple diff count)
-        changes = sum(1 for a, b in zip(request.text, corrected, strict=False) if a != b)
-        changes += abs(len(request.text) - len(corrected))
+        # Convert TextEdit to Edit schema
+        edits_list = []
+        if request.return_edits:
+            edits_list = [
+                Edit(
+                    offset=e.offset,
+                    length=e.length,
+                    original=e.original,
+                    replacement=e.replacement,
+                    message=e.message,
+                )
+                for e in edits
+            ]
 
-        stats = CorrectionStats(
-            length=len(corrected), changes=changes, processing_time_ms=round(processing_time, 2)
+        stats = Stats(
+            chars_count=len(corrected_text),
+            edits_count=len(edits),
+            processing_time_ms=round(processing_time, 2),
         )
 
-        return CorrectionResponse(
-            original=request.text, corrected=corrected, diff=diff_html, stats=stats
+        logger.debug(
+            f"Correction complete: chars={stats.chars_count}, "
+            f"edits={stats.edits_count}, time={stats.processing_time_ms}ms"
         )
+
+        return CorrectionResponse(result=corrected_text, edits=edits_list, stats=stats)
 
     except Exception as e:
         logger.error(f"Error during correction: {e}", exc_info=True)

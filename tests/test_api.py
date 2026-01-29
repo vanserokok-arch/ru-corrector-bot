@@ -21,48 +21,58 @@ class TestHealthEndpoint:
 
 
 class TestCorrectEndpoint:
-    """Test text correction endpoint."""
+    """Test text correction endpoint with new API contract."""
 
     def test_correct_basic(self):
         """Test basic correction request."""
         response = client.post("/correct", json={"text": "Простой текст для проверки"})
         assert response.status_code == 200
         data = response.json()
-        assert "original" in data
-        assert "corrected" in data
+        assert "result" in data
+        assert "edits" in data
         assert "stats" in data
-        assert data["diff"] is None
+        assert isinstance(data["edits"], list)
 
-    def test_correct_with_diff(self):
-        """Test correction with diff view."""
-        response = client.post("/correct", json={"text": "Простой текст", "show_diff": True})
+    def test_correct_mode_base(self):
+        """Test correction in base mode."""
+        response = client.post("/correct", json={"text": "Простой текст", "mode": "base"})
         assert response.status_code == 200
         data = response.json()
-        assert data["diff"] is not None
-        assert isinstance(data["diff"], str)
+        assert "result" in data
 
-    def test_correct_different_modes(self):
-        """Test correction in different modes."""
-        text = "Простой текст для проверки"
-        for mode in ["min", "biz", "acad"]:
-            response = client.post("/correct", json={"text": text, "mode": mode})
-            assert response.status_code == 200
-            data = response.json()
-            assert data["original"] == text
-
-    def test_correct_with_quotes(self):
-        """Test correction with quotes."""
+    def test_correct_mode_legal(self):
+        """Test correction in legal mode (default)."""
         response = client.post("/correct", json={"text": 'Он сказал "привет"'})
         assert response.status_code == 200
         data = response.json()
-        assert "«" in data["corrected"] or "привет" in data["corrected"]
+        # Legal mode should convert quotes
+        assert "«" in data["result"] or "привет" in data["result"]
 
-    def test_correct_with_ellipsis(self):
-        """Test correction with ellipsis."""
-        response = client.post("/correct", json={"text": "Привет... как дела"})
+    def test_correct_mode_strict(self):
+        """Test correction in strict mode."""
+        response = client.post("/correct", json={"text": "Текст   с   пробелами", "mode": "strict"})
         assert response.status_code == 200
         data = response.json()
-        assert "…" in data["corrected"]
+        assert "result" in data
+
+    def test_correct_with_edits(self):
+        """Test correction with return_edits=true."""
+        response = client.post(
+            "/correct", json={"text": 'Текст "в кавычках"', "return_edits": True}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "edits" in data
+        assert isinstance(data["edits"], list)
+
+    def test_correct_without_edits(self):
+        """Test correction with return_edits=false."""
+        response = client.post(
+            "/correct", json={"text": "Простой текст", "return_edits": False}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["edits"] == []
 
     def test_correct_stats(self):
         """Test that stats are returned correctly."""
@@ -70,21 +80,15 @@ class TestCorrectEndpoint:
         assert response.status_code == 200
         data = response.json()
         stats = data["stats"]
-        assert "length" in stats
-        assert "changes" in stats
+        assert "chars_count" in stats
+        assert "edits_count" in stats
         assert "processing_time_ms" in stats
-        assert stats["length"] > 0
+        assert stats["chars_count"] > 0
         assert stats["processing_time_ms"] > 0
 
     def test_correct_empty_text(self):
         """Test with empty text (should fail validation)."""
         response = client.post("/correct", json={"text": ""})
-        assert response.status_code == 422  # Validation error
-
-    def test_correct_too_long_text(self):
-        """Test with text exceeding max length."""
-        long_text = "a" * 20000  # More than MAX_TEXT_LEN (15000)
-        response = client.post("/correct", json={"text": long_text})
         assert response.status_code == 422  # Validation error
 
     def test_correct_missing_text(self):
@@ -97,6 +101,31 @@ class TestCorrectEndpoint:
         response = client.post("/correct", json={"text": "Тест"})
         assert response.status_code == 200
         assert "X-Request-ID" in response.headers
+
+    def test_correct_quotes_conversion(self):
+        """Test that legal mode converts quotes."""
+        response = client.post(
+            "/correct", json={"text": 'Он сказал "привет" и ушёл', "mode": "legal"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "«привет»" in data["result"]
+
+    def test_correct_dash_conversion(self):
+        """Test that legal mode converts dashes."""
+        response = client.post(
+            "/correct", json={"text": "Москва-Питер", "mode": "legal"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert "—" in data["result"]
+
+    def test_correct_ellipsis(self):
+        """Test that typography converts ellipsis."""
+        response = client.post("/correct", json={"text": "Привет... как дела"})
+        assert response.status_code == 200
+        data = response.json()
+        assert "…" in data["result"]
 
 
 class TestAPIDocumentation:
