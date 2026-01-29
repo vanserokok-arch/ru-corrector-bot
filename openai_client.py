@@ -80,7 +80,8 @@ def transcribe_ogg(file_path: str, language: str = "ru") -> str:
                 subprocess.run(
                     ['ffmpeg', '-i', str(input_path), '-ar', '16000', '-ac', '1', temp_wav.name],
                     check=True,
-                    capture_output=True
+                    capture_output=True,
+                    timeout=30  # 30 second timeout for ffmpeg conversion
                 )
                 file_to_transcribe = temp_wav.name
             except (subprocess.CalledProcessError, FileNotFoundError):

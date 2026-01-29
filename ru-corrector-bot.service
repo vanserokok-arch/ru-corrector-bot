@@ -4,8 +4,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=ubuntu
-Group=ubuntu
+User=botuser
+Group=botuser
 WorkingDirectory=/opt/ru-corrector-bot
 EnvironmentFile=/opt/ru-corrector-bot/.env
 ExecStart=/opt/ru-corrector-bot/.venv/bin/python3 /opt/ru-corrector-bot/app.py

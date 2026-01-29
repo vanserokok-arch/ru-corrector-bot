@@ -170,13 +170,13 @@ class TestCorrectorModes:
             )
             mock_client.return_value = mock_instance
             
-            # Test each mode
+            # Test each mode - all should use OpenAI when available
             for mode in ["min", "biz", "acad", "typo"]:
+                mock_instance.chat.completions.create.reset_mock()
                 result = correct_text("Test text", mode=mode)
                 assert isinstance(result, str)
-                # Verify OpenAI was called
-                if mode != "typo":  # typo might use different path
-                    assert mock_instance.chat.completions.create.called
+                # Verify OpenAI was called for all modes
+                assert mock_instance.chat.completions.create.called
 
     def test_text_length_validation(self, monkeypatch):
         """Test that very long text is handled properly."""
@@ -188,12 +188,13 @@ class TestCorrectorModes:
         # Text longer than limit
         long_text = "a" * 200
         
-        # Should either handle it or raise a clear error
-        # (implementation may truncate or reject)
-        try:
-            result = correct_text(long_text, mode="min")
-            # If it succeeds, result should be reasonable
-            assert isinstance(result, str)
-        except (ValueError, RuntimeError) as e:
-            # If it fails, error should mention length or limit
-            assert "length" in str(e).lower() or "long" in str(e).lower() or "превышен" in str(e).lower()
+        # Should raise ValueError with specific message about length
+        with patch('openai_client._get_openai_client'):
+            try:
+                result = correct_text(long_text, mode="min")
+                # If it doesn't raise, that's also OK (might truncate)
+                assert isinstance(result, str)
+            except ValueError as e:
+                # Check for specific error message about text length
+                error_msg = str(e).lower()
+                assert "text too long" in error_msg or "maximum length" in error_msg

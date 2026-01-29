@@ -101,15 +101,26 @@ async def diff_mode(msg: Message):
     if not src:
         await msg.reply("(пусто)")
         return
+    temp_html = None
     try:
         fixed, html = correct_text(src, make_diff_view=True)
-        path = "diff.html"
-        with open(path, "w", encoding="utf-8") as f:
-            f.write("<meta charset='utf-8'>" + html)
-        await bot.send_document(msg.chat.id, FSInputFile(path, filename="diff.html"))
+        # Use temporary file with proper cleanup
+        import tempfile
+        temp_html = tempfile.NamedTemporaryFile(mode='w', suffix='.html', delete=False, encoding='utf-8')
+        temp_html.write("<meta charset='utf-8'>" + html)
+        temp_html.close()
+        
+        await bot.send_document(msg.chat.id, FSInputFile(temp_html.name, filename="diff.html"))
     except Exception as e:
         logger.error(f"Error in diff mode: {e}", exc_info=True)
         await msg.reply("⚠️ Произошла ошибка. Попробуйте позже.")
+    finally:
+        # Clean up temporary file
+        if temp_html and os.path.exists(temp_html.name):
+            try:
+                os.unlink(temp_html.name)
+            except Exception:
+                pass
 
 
 @dp.message(F.voice)
