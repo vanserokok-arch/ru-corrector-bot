@@ -4,17 +4,20 @@ Production-ready Russian text correction service with clean layered architecture
 
 ## Features
 
+- ✅ **OpenAI Integration**: Advanced text correction and voice transcription with GPT-4 and Whisper
+- ✅ **Multiple Correction Modes**: Minimal (min), Business (biz), Academic (acad), Typography-only (typo), Diff view
+- ✅ **Voice Message Support**: Transcribe and correct voice messages via Whisper API
+- ✅ **Intelligent Fallback**: Works without OpenAI key using local typography rules
 - ✅ **Layered Architecture**: Clean separation between API, engine, and providers
-- ✅ **Spelling & Grammar**: Powered by LanguageTool
-- ✅ **Legal Document Formatting**: Russian quotes («»), em-dashes (—), proper spacing
-- ✅ **Typography**: Russian typography rules (quotes, dashes, spaces, ellipsis)
-- ✅ **Multiple Modes**: Base, Legal, Strict correction modes
+- ✅ **Spelling & Grammar**: Powered by OpenAI GPT or LanguageTool (fallback)
+- ✅ **Russian Typography**: Proper quotes («»), em-dashes (—), ellipsis (…), spacing
 - ✅ **FastAPI**: Modern async API with automatic documentation
-- ✅ **Telegram Bot**: Optional standalone bot (run separately)
+- ✅ **Telegram Bot**: Production-ready standalone bot
 - ✅ **Docker Ready**: Production-ready containerized deployment
-- ✅ **Structured Logging**: Request tracking and performance monitoring
-- ✅ **Health Checks**: Built-in health monitoring
-- ✅ **Tested**: Comprehensive unit and integration tests (65 tests)
+- ✅ **systemd Service**: Easy deployment on Ubuntu/Linux servers
+- ✅ **Structured Logging**: Request tracking and error monitoring
+- ✅ **Comprehensive Tests**: 82+ unit and integration tests with OpenAI mocking
+- ✅ **No Import-Time Failures**: Graceful degradation when services unavailable
 
 ## Architecture
 
@@ -431,6 +434,245 @@ docker-compose up -d
 # 4. Verify
 curl http://localhost:8000/health
 ```
+
+## Telegram Bot Deployment
+
+### Quick Start (Bot)
+
+1. **Get a Telegram Bot Token**:
+   - Message [@BotFather](https://t.me/BotFather) on Telegram
+   - Create a new bot with `/newbot`
+   - Copy the token provided
+
+2. **Get OpenAI API Key** (required for voice and advanced corrections):
+   - Sign up at [OpenAI](https://platform.openai.com/)
+   - Create an API key at https://platform.openai.com/api-keys
+   - Copy the key (starts with `sk-`)
+
+3. **Configure Environment**:
+```bash
+cp .env.example .env
+# Edit .env and set:
+# BOT_TOKEN=your_telegram_bot_token
+# OPENAI_API_KEY=your_openai_api_key
+```
+
+4. **Run the Bot**:
+```bash
+# Install dependencies
+pip install -r requirements.txt
+
+# Run bot
+python3 app.py
+```
+
+### Production Deployment on Ubuntu 22.04
+
+#### 1. Prerequisites
+
+```bash
+# Update system
+sudo apt update && sudo apt upgrade -y
+
+# Install Python 3.11+ and dependencies
+sudo apt install -y python3.11 python3.11-venv python3-pip ffmpeg git
+
+# Create deployment user (optional but recommended)
+sudo useradd -r -s /bin/bash -d /opt/ru-corrector-bot -m botuser
+```
+
+#### 2. Install Application
+
+```bash
+# Switch to bot user
+sudo su - botuser
+
+# Clone repository
+cd /opt
+sudo git clone https://github.com/vanserokok-arch/ru-corrector-bot.git
+sudo chown -R botuser:botuser /opt/ru-corrector-bot
+cd /opt/ru-corrector-bot
+
+# Create virtual environment
+python3.11 -m venv .venv
+source .venv/bin/activate
+
+# Install dependencies
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+#### 3. Configure Environment
+
+```bash
+# Copy and edit configuration
+cp .env.example .env
+nano .env
+```
+
+Set the following variables in `.env`:
+
+```bash
+# Required
+BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789
+OPENAI_API_KEY=sk-proj-xxxxxxxxxxxxxxxxxxxxx
+
+# Optional (with defaults)
+DEFAULT_MODE=min
+OPENAI_TEXT_MODEL=gpt-4o-mini
+OPENAI_TRANSCRIBE_MODEL=whisper-1
+OPENAI_TIMEOUT_SECONDS=60
+MAX_TEXT_LEN=15000
+```
+
+**Important Environment Variables:**
+
+- `BOT_TOKEN`: Get from [@BotFather](https://t.me/BotFather) (required)
+- `OPENAI_API_KEY`: OpenAI API key (required for voice and AI corrections)
+- `DEFAULT_MODE`: Default correction mode - `min` (minimal), `biz` (business), `acad` (academic), `typo` (typography only)
+- `OPENAI_TEXT_MODEL`: Model for text corrections (default: `gpt-4o-mini` for cost efficiency)
+- `OPENAI_TRANSCRIBE_MODEL`: Model for voice transcription (default: `whisper-1`)
+
+**Fallback Mode**: If `OPENAI_API_KEY` is not set:
+- Text commands use local typography rules (quotes, dashes, spaces)
+- Voice messages return an error asking for API key configuration
+
+#### 4. Set Up systemd Service
+
+```bash
+# Exit from botuser
+exit
+
+# Copy systemd service file
+sudo cp /opt/ru-corrector-bot/ru-corrector-bot.service /etc/systemd/system/
+
+# Create log directory
+sudo mkdir -p /var/log/ru-corrector-bot
+sudo chown botuser:botuser /var/log/ru-corrector-bot
+
+# Reload systemd
+sudo systemctl daemon-reload
+
+# Enable and start service
+sudo systemctl enable ru-corrector-bot
+sudo systemctl start ru-corrector-bot
+
+# Check status
+sudo systemctl status ru-corrector-bot
+```
+
+#### 5. Monitor and Manage
+
+```bash
+# View logs
+sudo journalctl -u ru-corrector-bot -f
+
+# Or view log files directly
+tail -f /var/log/ru-corrector-bot/bot.log
+tail -f /var/log/ru-corrector-bot/error.log
+
+# Restart service
+sudo systemctl restart ru-corrector-bot
+
+# Stop service
+sudo systemctl stop ru-corrector-bot
+
+# Check service status
+sudo systemctl status ru-corrector-bot
+```
+
+#### 6. Update Application
+
+```bash
+# Switch to bot user
+sudo su - botuser
+cd /opt/ru-corrector-bot
+
+# Pull latest changes
+git pull
+
+# Activate virtual environment
+source .venv/bin/activate
+
+# Update dependencies if needed
+pip install -r requirements.txt
+
+# Exit and restart service
+exit
+sudo systemctl restart ru-corrector-bot
+```
+
+### Testing the Bot
+
+1. **Start a conversation** with your bot on Telegram
+2. **Test text correction**:
+   - Send: `Он не пришол "сегодня" - а я ждал`
+   - Expected: Corrected text with proper spelling and typography
+3. **Test modes**:
+   - `/min Текст с ошибкой` - minimal corrections
+   - `/biz Привет! Можем обсудить?` - business style
+   - `/acad Результаты показали что метод работает` - academic style
+   - `/typo "Кавычки" и - тире` - typography only
+4. **Test voice** (requires OPENAI_API_KEY):
+   - Send a voice message
+   - Bot will transcribe and correct it
+
+### Troubleshooting
+
+**Bot doesn't start:**
+```bash
+# Check logs
+sudo journalctl -u ru-corrector-bot -n 50
+
+# Check if BOT_TOKEN is set correctly
+sudo cat /opt/ru-corrector-bot/.env | grep BOT_TOKEN
+
+# Test bot manually
+sudo su - botuser
+cd /opt/ru-corrector-bot
+source .venv/bin/activate
+BOT_TOKEN="your_token" python3 app.py
+```
+
+**Voice messages don't work:**
+- Verify `OPENAI_API_KEY` is set in `.env`
+- Check ffmpeg is installed: `which ffmpeg`
+- Check logs for OpenAI errors
+
+**Text correction doesn't work:**
+- If OPENAI_API_KEY is not set, bot uses fallback (basic typography)
+- Check OpenAI API key is valid
+- Check internet connectivity to OpenAI API
+- Monitor for rate limit errors in logs
+
+**Service keeps restarting:**
+```bash
+# View recent errors
+sudo journalctl -u ru-corrector-bot -n 100 --no-pager
+
+# Check if port is already in use
+# (Bot uses Telegram polling, not HTTP ports)
+
+# Verify Python environment
+sudo su - botuser
+cd /opt/ru-corrector-bot
+source .venv/bin/activate
+python3 -c "import aiogram; print('OK')"
+```
+
+## Environment Variables Reference
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `BOT_TOKEN` | Yes | - | Telegram bot token from @BotFather |
+| `OPENAI_API_KEY` | No* | - | OpenAI API key (*required for voice & AI corrections) |
+| `DEFAULT_MODE` | No | `min` | Default correction mode (min/biz/acad/typo) |
+| `OPENAI_TEXT_MODEL` | No | `gpt-4o-mini` | OpenAI model for text correction |
+| `OPENAI_TRANSCRIBE_MODEL` | No | `whisper-1` | OpenAI model for voice transcription |
+| `OPENAI_TIMEOUT_SECONDS` | No | `60` | Timeout for OpenAI API calls |
+| `MAX_TEXT_LEN` | No | `15000` | Maximum text length to process |
+| `LT_URL` | No | `https://api.languagetool.org` | LanguageTool API URL (fallback) |
+| `LT_LANGUAGE` | No | `ru-RU` | Language for LanguageTool (fallback) |
 
 ## License
 
