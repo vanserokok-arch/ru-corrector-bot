@@ -1,0 +1,73 @@
+name: Python Tests
+
+on:
+  push:
+    branches: [ main, copilot/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ffmpeg
+    
+    - name: Install Python dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        # Install compatible versions for testing
+        pip install 'pydantic>=2.4.1,<2.6' 'pydantic-settings>=2.0.0,<2.7' 'httpx>=0.25.0,<0.28.0'
+    
+    - name: Run tests with pytest
+      run: |
+        python -m pytest -v --tb=short
+      env:
+        # Provide dummy bot token for tests
+        BOT_TOKEN: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789"
+    
+    - name: Test import without OPENAI_API_KEY
+      run: |
+        python -c "import openai_client; import core_corrector; import app; print('✓ All modules import successfully without OPENAI_API_KEY')"
+      env:
+        BOT_TOKEN: "123456789:ABCdefGHIjklMNOpqrsTUVwxyz123456789"
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install ruff black
+    
+    - name: Check code formatting with black
+      run: |
+        black --check --diff .
+      continue-on-error: true
+    
+    - name: Lint with ruff
+      run: |
+        ruff check .
+      continue-on-error: true

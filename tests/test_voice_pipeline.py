@@ -168,7 +168,8 @@ class TestVoicePipeline:
             try:
                 with pytest.raises(RuntimeError) as exc_info:
                     transcribe_ogg(tmp_path)
-                assert "Failed to transcribe" in str(exc_info.value)
+                # Error message is now in Russian
+                assert "Ошибка распознавания" in str(exc_info.value) or "API Error" in str(exc_info.value)
             finally:
                 if os.path.exists(tmp_path):
                     os.unlink(tmp_path)

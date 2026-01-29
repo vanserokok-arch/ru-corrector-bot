@@ -16,29 +16,34 @@ _openai_imported = False
 
 
 def _get_openai_client():
-    """Get or create OpenAI client instance (lazy initialization)."""
+    """Get or create OpenAI client instance (lazy initialization).
+    
+    Returns None if OpenAI is not available (missing package or API key).
+    Does not raise exceptions - allows graceful fallback.
+    """
     global _openai_client, _openai_imported
     
     if not _openai_imported:
         try:
             from openai import OpenAI
             _openai_imported = True
-        except ImportError as e:
-            raise RuntimeError(
-                "OpenAI package not installed. Install with: pip install openai"
-            ) from e
+        except ImportError:
+            # OpenAI package not installed - return None for fallback
+            return None
     
     if _openai_client is None:
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
-            raise RuntimeError(
-                "OPENAI_API_KEY environment variable is required for OpenAI features. "
-                "Please set it in your .env file."
-            )
+            # No API key - return None for fallback
+            return None
         
-        from openai import OpenAI
-        timeout = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
-        _openai_client = OpenAI(api_key=api_key, timeout=timeout)
+        try:
+            from openai import OpenAI
+            timeout = int(os.getenv("OPENAI_TIMEOUT_SECONDS", "60"))
+            _openai_client = OpenAI(api_key=api_key, timeout=timeout)
+        except Exception:
+            # Failed to create client - return None for fallback
+            return None
     
     return _openai_client
 
@@ -63,6 +68,11 @@ def transcribe_ogg(file_path: str, language: str = "ru") -> str:
         RuntimeError: If OpenAI is not configured or API call fails
     """
     client = _get_openai_client()
+    if client is None:
+        raise RuntimeError(
+            "OpenAI не настроен. Для распознавания голоса требуется OPENAI_API_KEY."
+        )
+    
     model = os.getenv("OPENAI_TRANSCRIBE_MODEL", "whisper-1")
     
     # Convert OGG to WAV if needed (Whisper accepts many formats, but WAV is most compatible)
@@ -84,8 +94,8 @@ def transcribe_ogg(file_path: str, language: str = "ru") -> str:
                     timeout=30  # 30 second timeout for ffmpeg conversion
                 )
                 file_to_transcribe = temp_wav.name
-            except (subprocess.CalledProcessError, FileNotFoundError):
-                # ffmpeg not available or conversion failed, try with original file
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+                # ffmpeg not available, conversion failed, or timed out - try with original file
                 file_to_transcribe = file_path
         else:
             file_to_transcribe = file_path
@@ -102,7 +112,7 @@ def transcribe_ogg(file_path: str, language: str = "ru") -> str:
         return transcript.strip() if isinstance(transcript, str) else transcript.text.strip()
         
     except Exception as e:
-        raise RuntimeError(f"Failed to transcribe audio: {str(e)}") from e
+        raise RuntimeError(f"Ошибка распознавания аудио: {str(e)}") from e
     finally:
         # Clean up temporary WAV file
         if temp_wav and os.path.exists(temp_wav.name):
@@ -139,6 +149,11 @@ def correct_text_openai(text: str, mode: str = "min") -> str:
         raise ValueError(f"Invalid mode: {mode}. Must be one of: min, biz, acad, typo, diff")
     
     client = _get_openai_client()
+    if client is None:
+        raise RuntimeError(
+            "OpenAI не настроен. Для коррекции через AI требуется OPENAI_API_KEY."
+        )
+    
     model = os.getenv("OPENAI_TEXT_MODEL", "gpt-4o-mini")
     
     # Define system prompts for each mode
