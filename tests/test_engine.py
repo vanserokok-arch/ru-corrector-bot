@@ -237,6 +237,21 @@ class TestCorrectionModes:
         # Should have non-breaking space before г.
         assert "г.\u00a0" in result or "г." in result
 
+    def test_mode_typo_applies_legal_typography_and_typography_only(self):
+        """Test typo mode pipeline: normalize -> legal typography -> typography."""
+        # Provider edits must not be used in typo mode
+        provider = MockProvider([TextEdit(offset=0, length=6, original="пришол", replacement="пришёл")])
+        engine = CorrectionEngine(provider=provider)
+
+        text = 'пришол "сегодня" - ст. 15 ГК РФ № 123 10 руб.'
+        result = engine.correct(text, mode="typo")
+
+        assert "пришол" in result.text
+        assert "ст.\u00a015" in result.text
+        assert "№\u00a0123" in result.text
+        assert "10\u00a0руб." in result.text
+        assert result.edits == []
+
 
 class TestDeterministicBehavior:
     """Test that engine produces deterministic results."""

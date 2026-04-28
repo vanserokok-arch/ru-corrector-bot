@@ -175,6 +175,19 @@ class CorrectionEngine:
         
         return t, edits
 
+    def apply_legal_typography(self, text: str) -> str:
+        """
+        Apply legal typography rules without generating edits.
+
+        Rules:
+        - Convert straight quotes "" to Russian quotes «»
+        - Convert dash between words to em-dash with spaces
+        """
+        t = text
+        t = re.sub(r'"([^"\n]+)"', r"«\1»", t)
+        t = re.sub(r"(?<=\w)\s*-\s*(?=\w)", " — ", t)
+        return t
+
     def apply_strict_rules(self, text: str) -> str:
         """
         Apply strict normalization rules.
@@ -219,7 +232,7 @@ class CorrectionEngine:
         
         # Non-breaking spaces with units
         t = re.sub(
-            r"(\d)\s+(кг|г|м|км|см|мм|л|мл|шт|тыс\.|млн|млрд)",
+            r"(\d)\s+(кг|г|м|км|см|мм|л|мл|шт|тыс\.|млн|млрд|руб\.)",
             rf"\1{NBSP}\2",
             t,
             flags=re.IGNORECASE,
@@ -244,7 +257,7 @@ class CorrectionEngine:
 
         Pipeline varies by mode:
 
-        * **typo**   — normalize → typography only (no LanguageTool)
+        * **typo**   — normalize → legal typography → typography only (no LanguageTool)
         * **base**   — normalize → LanguageTool → typography
         * **legal**  — normalize → LanguageTool → legal rules → typography  (default)
         * **strict** — normalize → LanguageTool → legal rules → strict rules → typography
@@ -271,11 +284,10 @@ class CorrectionEngine:
         normalized = self.normalize(text)
         logger.debug("Text normalized")
 
-        # ---- typo mode: local formatting + typography, no LanguageTool ----
+        # ---- typo mode: local legal typography + typography, no LanguageTool ----
         if mode == Mode.typo:
-            # Apply quote/dash rules locally (no network call)
-            text_after_typo_rules, _ = self.apply_legal_rules(normalized)
-            final_text = self.apply_typography(text_after_typo_rules)
+            text_after_legal_typography = self.apply_legal_typography(normalized)
+            final_text = self.apply_typography(text_after_legal_typography)
             logger.info("Correction complete (typo mode): 0 LT edits")
             return CorrectionResult(text=final_text, edits=[])
 
