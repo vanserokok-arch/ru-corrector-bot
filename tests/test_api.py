@@ -114,7 +114,7 @@ class TestCorrectEndpoint:
     def test_correct_dash_conversion(self):
         """Test that legal mode converts dashes."""
         response = client.post(
-            "/correct", json={"text": "Москва-Питер", "mode": "legal"}
+            "/correct", json={"text": "Москва - Питер", "mode": "legal"}
         )
         assert response.status_code == 200
         data = response.json()
