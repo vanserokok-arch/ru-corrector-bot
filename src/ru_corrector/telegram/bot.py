@@ -10,6 +10,7 @@ import atexit
 import os
 import signal
 import sys
+import tempfile
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
@@ -22,6 +23,7 @@ load_dotenv(dotenv_path=env_path)
 
 from ..config import config
 from ..core.engine import CorrectionEngine
+from ..core.models import CorrectionResult, Mode
 from ..logging_config import get_logger, setup_logging
 
 # Setup logging
@@ -103,19 +105,20 @@ HELP = (
     "Привет! Я исправляю русский текст. Режимы работы:\n\n"
     "/base <текст> — базовый режим (только LanguageTool)\n"
     "/legal <текст> — юридический режим (форматирование, кавычки, тире)\n"
-    "/strict <текст> — строгий режим (агрессивная нормализация)\n\n"
+    "/strict <текст> — строгий режим (агрессивная нормализация)\n"
+    "/typo <текст> — только типографика (кавычки, тире, пробелы)\n"
+    "/diff <текст> — юридический режим + файл с выделением изменений\n\n"
     "Без команды — режим по умолчанию (legal)."
 )
 
 
-def run_correction(text: str, mode: str = "legal") -> str:
-    """Run correction engine."""
+def run_correction(text: str, mode: Mode = Mode.legal) -> CorrectionResult | None:
+    """Run correction engine and return CorrectionResult, or None on error."""
     try:
-        corrected, _ = engine.correct(text, mode=mode)
-        return corrected
+        return engine.correct(text, mode=mode)
     except Exception as e:
         logger.error(f"Error in correction: {e}", exc_info=True)
-        return f"Ошибка при обработке текста: {str(e)}"
+        return None
 
 
 @dp.message(F.text.startswith("/start"))
@@ -134,8 +137,11 @@ async def base_mode(msg: Message):
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
-    fixed = run_correction(src, "base")
-    await msg.reply(fixed or "(пусто)")
+    result = run_correction(src, Mode.base)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+    await msg.reply(result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/legal"))
@@ -144,8 +150,11 @@ async def legal_mode(msg: Message):
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
-    fixed = run_correction(src, "legal")
-    await msg.reply(fixed or "(пусто)")
+    result = run_correction(src, Mode.legal)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+    await msg.reply(result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/strict"))
@@ -154,8 +163,57 @@ async def strict_mode(msg: Message):
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
-    fixed = run_correction(src, "strict")
-    await msg.reply(fixed or "(пусто)")
+    result = run_correction(src, Mode.strict)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+    await msg.reply(result.text or "(пусто)")
+
+
+@dp.message(F.text.startswith("/typo"))
+async def typo_mode(msg: Message):
+    src = msg.text[len("/typo") :].strip()
+    if not src:
+        await msg.reply("Пожалуйста, укажите текст для проверки")
+        return
+    result = run_correction(src, Mode.typo)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+    await msg.reply(result.text or "(пусто)")
+
+
+@dp.message(F.text.startswith("/diff"))
+async def diff_mode(msg: Message):
+    src = msg.text[len("/diff") :].strip()
+    if not src:
+        await msg.reply("Пожалуйста, укажите текст для проверки")
+        return
+
+    result = run_correction(src, Mode.diff)
+    if result is None or result.diff_html is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".html", delete=False
+    ) as f:
+        f.write("<meta charset='utf-8'>\n" + result.diff_html)
+        temp_path = f.name
+
+    try:
+        from aiogram.types import FSInputFile
+
+        await bot.send_document(
+            msg.chat.id,
+            FSInputFile(temp_path, filename="diff.html"),
+            caption="Изменения выделены цветом",
+        )
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
 
 
 @dp.message()
@@ -163,11 +221,17 @@ async def default_handler(msg: Message):
     """Handle messages without command."""
     if not msg.text:
         return
-    
-    # Use default mode from config
-    default_mode = config.DEFAULT_MODE or "legal"
-    fixed = run_correction(msg.text, default_mode)
-    await msg.reply(fixed or "(пусто)")
+
+    try:
+        default_mode = Mode(config.DEFAULT_MODE) if config.DEFAULT_MODE else Mode.legal
+    except ValueError:
+        default_mode = Mode.legal
+
+    result = run_correction(msg.text, default_mode)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+    await msg.reply(result.text or "(пусто)")
 
 
 async def get_bot_info():

@@ -2,6 +2,10 @@ import os
 import asyncio
 import tempfile
 import logging
+# DEPRECATED: This is the legacy OpenAI-first Telegram bot.
+# The canonical Telegram bot is src/ru_corrector/telegram/bot.py.
+# This file is kept for backward compatibility and reference only.
+# New deployments should use: python -m ru_corrector.telegram.bot
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, FSInputFile
 from dotenv import load_dotenv

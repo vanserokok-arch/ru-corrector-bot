@@ -1,15 +1,14 @@
 """Core correction engine."""
 
 import re
-from typing import Literal
+from typing import Union
 
-from ..core.models import TextEdit
+from ..core.models import CorrectionResult, Mode, TextEdit
 from ..logging_config import get_logger
 from ..providers.languagetool import LanguageToolProvider
+from ..services.diff_view import make_diff
 
 logger = get_logger(__name__)
-
-Mode = Literal["base", "legal", "strict"]
 
 NBSP = "\u00a0"
 
@@ -235,61 +234,88 @@ class CorrectionEngine:
         
         return t
 
-    def correct(self, text: str, mode: Mode = "legal") -> tuple[str, list[TextEdit]]:
+    def correct(
+        self,
+        text: str,
+        mode: Union[Mode, str] = Mode.legal,
+    ) -> CorrectionResult:
         """
         Main correction pipeline.
-        
-        Pipeline:
-        1. Normalize whitespace
-        2. Get provider corrections (LanguageTool)
-        3. Apply mode-specific rules
-        4. Deduplicate and resolve conflicts
-        5. Apply edits
-        6. Apply typography
-        
+
+        Pipeline varies by mode:
+
+        * **typo**   — normalize → typography only (no LanguageTool)
+        * **base**   — normalize → LanguageTool → typography
+        * **legal**  — normalize → LanguageTool → legal rules → typography  (default)
+        * **strict** — normalize → LanguageTool → legal rules → strict rules → typography
+        * **diff**   — same corrections as *legal* + HTML diff generated internally
+
         Args:
             text: Text to correct
-            mode: Correction mode (base, legal, strict)
-            
+            mode: Correction mode (base, legal, strict, typo, diff)
+
         Returns:
-            Tuple of (corrected_text, list of edits)
+            CorrectionResult with corrected text, list of edits, and optional diff_html
         """
-        logger.info(f"Starting correction: mode={mode}, length={len(text)}")
-        
+        # Normalise string value from API/env to enum when needed
+        if isinstance(mode, str):
+            try:
+                mode = Mode(mode)
+            except ValueError:
+                logger.warning(f"Unknown mode {mode!r}, falling back to 'legal'")
+                mode = Mode.legal
+
+        logger.info(f"Starting correction: mode={mode.value}, length={len(text)}")
+
         # Step 1: Normalize
         normalized = self.normalize(text)
         logger.debug("Text normalized")
-        
-        # Step 2: Get provider corrections (base mode)
-        provider_edits = []
-        if mode in ("base", "legal", "strict"):
-            provider_edits = self.provider.check(normalized)
-        
+
+        # ---- typo mode: local formatting + typography, no LanguageTool ----
+        if mode == Mode.typo:
+            # Apply quote/dash rules locally (no network call)
+            text_after_typo_rules, _ = self.apply_legal_rules(normalized)
+            final_text = self.apply_typography(text_after_typo_rules)
+            logger.info("Correction complete (typo mode): 0 LT edits")
+            return CorrectionResult(text=final_text, edits=[])
+
+        # ---- base / legal / strict / diff ----
+
+        # Step 2: Get provider corrections
+        provider_edits = self.provider.check(normalized)
+
         # Apply provider edits first
         text_after_provider = self.apply_edits(normalized, provider_edits)
-        
+
         # Step 3: Apply mode-specific rules
         all_edits = provider_edits.copy()
-        
-        if mode in ("legal", "strict"):
-            # Apply legal rules
+
+        # diff mode behaves like legal for text transformation
+        effective_mode = Mode.legal if mode == Mode.diff else mode
+
+        if effective_mode in (Mode.legal, Mode.strict):
             text_after_legal, legal_edits = self.apply_legal_rules(text_after_provider)
             all_edits.extend(legal_edits)
         else:
             text_after_legal = text_after_provider
-        
-        if mode == "strict":
-            # Apply strict rules
+
+        if effective_mode == Mode.strict:
             text_after_strict = self.apply_strict_rules(text_after_legal)
         else:
             text_after_strict = text_after_legal
-        
+
         # Step 4: Apply typography
         final_text = self.apply_typography(text_after_strict)
-        
+
         # Step 5: Deduplicate edits (for reporting)
         final_edits = self.deduplicate_edits(all_edits)
-        
+
         logger.info(f"Correction complete: {len(final_edits)} edits made")
-        
-        return final_text, final_edits
+
+        # Step 6: Generate diff HTML when mode is diff
+        diff_html: str | None = None
+        if mode == Mode.diff:
+            diff_html = make_diff(text, final_text)
+            logger.debug("Diff HTML generated")
+
+        return CorrectionResult(text=final_text, edits=final_edits, diff_html=diff_html)

@@ -2,22 +2,33 @@
 
 Production-ready Russian text correction service with clean layered architecture: FastAPI API layer, correction engine, provider layer, and optional Telegram bot.
 
+> **Canonical entrypoints (Phase 2+)**
+> - **API**: `python -m uvicorn --app-dir src ru_corrector.app:app`
+> - **Telegram bot**: `python -m ru_corrector.telegram.bot`
+>
+> **Legacy / deprecated** (kept for reference, not for new deployments):
+> - `app.py` — original OpenAI-first Telegram bot *(deprecated)*
+
 ## Features
 
-- ✅ **OpenAI Integration**: Advanced text correction and voice transcription with GPT-4 and Whisper
-- ✅ **Multiple Correction Modes**: Minimal (min), Business (biz), Academic (acad), Typography-only (typo), Diff view
-- ✅ **Voice Message Support**: Transcribe and correct voice messages via Whisper API
-- ✅ **Intelligent Fallback**: Works without OpenAI key using local typography rules
+- ✅ **Multiple Correction Modes**: base, legal (default), strict, typo, diff
 - ✅ **Layered Architecture**: Clean separation between API, engine, and providers
-- ✅ **Spelling & Grammar**: Powered by OpenAI GPT or LanguageTool (fallback)
 - ✅ **Russian Typography**: Proper quotes («»), em-dashes (—), ellipsis (…), spacing
 - ✅ **FastAPI**: Modern async API with automatic documentation
-- ✅ **Telegram Bot**: Production-ready standalone bot
+- ✅ **Telegram Bot**: Production-ready standalone bot with all modes
 - ✅ **Docker Ready**: Production-ready containerized deployment
-- ✅ **systemd Service**: Easy deployment on Ubuntu/Linux servers
 - ✅ **Structured Logging**: Request tracking and error monitoring
-- ✅ **Comprehensive Tests**: 82+ unit and integration tests with OpenAI mocking
-- ✅ **No Import-Time Failures**: Graceful degradation when services unavailable
+- ✅ **Comprehensive Tests**: 95+ unit and integration tests
+
+## Correction Modes
+
+| Mode | Description |
+|------|-------------|
+| `base` | LanguageTool only (spelling, grammar, punctuation) |
+| `legal` | base + Russian quotes «», em-dashes —, legal formatting **(default)** |
+| `strict` | legal + aggressive whitespace/punctuation normalisation |
+| `typo` | Typography only — no LanguageTool (quotes, dashes, NBSP, ellipsis) |
+| `diff` | Same corrections as legal; diff HTML is produced by the caller / bot |
 
 ## Architecture
 
@@ -231,9 +242,11 @@ python -m ru_corrector.telegram.bot
 ### Bot Commands
 
 - `/start` or `/help` - Show help
-- `/base <text>` - Base mode correction
-- `/legal <text>` - Legal mode correction (default)
-- `/strict <text>` - Strict mode correction
+- `/base <text>` - Base mode (LanguageTool only)
+- `/legal <text>` - Legal mode (default — LanguageTool + formatting)
+- `/strict <text>` - Strict mode (aggressive normalisation)
+- `/typo <text>` - Typography only (no LanguageTool)
+- `/diff <text>` - Legal corrections + sends an HTML diff file showing changes
 - Send text without command - Uses default mode (legal)
 
 ## Configuration

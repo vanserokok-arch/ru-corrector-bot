@@ -2,7 +2,19 @@
 """
 Demonstration script showing the layered architecture in action.
 This uses a mock provider to avoid needing an external LanguageTool server.
+
+Run from the project root:
+    python demo.py           # with pip install -e . (editable install)
+    python demo.py           # also works without install via sys.path injection below
 """
+
+import os
+import sys
+
+# Allow running directly from the project root without `pip install -e .`
+_src_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "src")
+if _src_path not in sys.path:
+    sys.path.insert(0, _src_path)
 
 from ru_corrector.core.engine import CorrectionEngine
 from ru_corrector.providers.mock import MockProvider

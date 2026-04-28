@@ -2,7 +2,9 @@
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from ..config import config
 
 
 class Edit(BaseModel):
@@ -27,10 +29,29 @@ class CorrectionRequest(BaseModel):
     """Request model for text correction."""
 
     text: str = Field(..., description="Text to correct", min_length=1)
-    mode: Literal["base", "legal", "strict"] = Field(
-        default="legal", description="Correction mode: base (minimal), legal (default), strict (aggressive)"
+    mode: Literal["base", "legal", "strict", "typo", "diff"] = Field(
+        default="legal",
+        description=(
+            "Correction mode: base (LanguageTool only), legal (default, + formatting), "
+            "strict (legal + aggressive normalisation), typo (typography only), "
+            "diff (legal corrections — diff HTML is produced by the caller)"
+        ),
     )
     return_edits: bool = Field(default=True, description="Return list of edits made")
+
+    @field_validator("text")
+    @classmethod
+    def validate_text_length(cls, v: str) -> str:
+        """Reject text that exceeds the configured maximum length.
+
+        Uses ``len(v)`` which counts Unicode code points, consistent with how
+        ``config.MAX_TEXT_LEN`` is described ("characters").
+        """
+        if len(v) > config.MAX_TEXT_LEN:
+            raise ValueError(
+                f"Text too long: {len(v)} characters. Maximum allowed is {config.MAX_TEXT_LEN}."
+            )
+        return v
 
 
 class CorrectionResponse(BaseModel):

@@ -14,12 +14,22 @@ _lt = None
 
 
 def _get_languagetool():
-    """Get or initialize LanguageTool client."""
+    """Get or initialize LanguageTool client.
+
+    Uses ``LanguageTool(remote_server=url)`` which connects to the given HTTP
+    endpoint **without** spawning a local Java process.  When ``config.LT_URL``
+    points at the official public API the behaviour is identical to
+    ``LanguageToolPublicAPI``; for self-hosted servers the same constructor
+    argument is used, so no code-path change is required.
+    """
     global _lt
     if _lt is None:
         from language_tool_python import LanguageTool
 
-        logger.debug(f"Initializing LanguageTool with server: {config.LT_URL}, language: {config.LT_LANGUAGE}")
+        logger.debug(
+            f"Initializing LanguageTool with server: {config.LT_URL}, language: {config.LT_LANGUAGE}"
+        )
+        # remote_server= prevents LanguageTool from starting a local Java process.
         _lt = LanguageTool(language=config.LT_LANGUAGE, remote_server=config.LT_URL)
     return _lt
 
@@ -34,22 +44,28 @@ class LanguageToolProvider(CorrectionProvider):
     def check(self, text: str) -> list[TextEdit]:
         """
         Check text with LanguageTool and return edits.
-        
+
         Args:
             text: Text to check
-            
+
         Returns:
             List of TextEdit objects
         """
         logger.debug("Checking text with LanguageTool")
         lt = _get_languagetool()
-        matches = lt.check(text)
-        
+
+        try:
+            # lt.check() returns list[Match] directly
+            matches = lt.check(text)
+        except Exception as exc:
+            logger.warning(f"LanguageTool check failed, returning no corrections: {exc}")
+            return []
+
         edits = []
-        for m in matches.matches:
+        for m in matches:
             if not m.replacements:
                 continue
-                
+
             edit = TextEdit(
                 offset=m.offset,
                 length=m.errorLength,
@@ -59,6 +75,6 @@ class LanguageToolProvider(CorrectionProvider):
                 rule_id=m.ruleId or "",
             )
             edits.append(edit)
-        
+
         logger.debug(f"LanguageTool found {len(edits)} potential corrections")
         return edits
