@@ -29,8 +29,13 @@ class CorrectionRequest(BaseModel):
     """Request model for text correction."""
 
     text: str = Field(..., description="Text to correct", min_length=1)
-    mode: Literal["base", "legal", "strict"] = Field(
-        default="legal", description="Correction mode: base (minimal), legal (default), strict (aggressive)"
+    mode: Literal["base", "legal", "strict", "typo", "diff"] = Field(
+        default="legal",
+        description=(
+            "Correction mode: base (LanguageTool only), legal (default, + formatting), "
+            "strict (legal + aggressive normalisation), typo (typography only), "
+            "diff (legal corrections — diff HTML is produced by the caller)"
+        ),
     )
     return_edits: bool = Field(default=True, description="Return list of edits made")
 

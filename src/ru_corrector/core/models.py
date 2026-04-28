@@ -1,6 +1,26 @@
 """Core data models for text correction."""
 
 from dataclasses import dataclass
+from enum import Enum
+
+
+class Mode(str, Enum):
+    """Unified correction mode used by the engine, API, and Telegram bot.
+
+    Values
+    ------
+    base   — LanguageTool corrections only (spelling, grammar, punctuation)
+    legal  — base + Russian quotes, em-dashes, legal formatting (default)
+    strict — legal + aggressive whitespace/punctuation normalisation
+    typo   — typography only (quotes, dashes, ellipsis, NBSP) — no LanguageTool
+    diff   — same corrections as *legal*, diff HTML is produced by the caller
+    """
+
+    base = "base"
+    legal = "legal"
+    strict = "strict"
+    typo = "typo"
+    diff = "diff"
 
 
 @dataclass

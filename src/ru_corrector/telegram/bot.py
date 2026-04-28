@@ -10,6 +10,7 @@ import atexit
 import os
 import signal
 import sys
+import tempfile
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
@@ -23,6 +24,7 @@ load_dotenv(dotenv_path=env_path)
 from ..config import config
 from ..core.engine import CorrectionEngine
 from ..logging_config import get_logger, setup_logging
+from ..services.diff_view import make_diff
 
 # Setup logging
 setup_logging()
@@ -103,7 +105,9 @@ HELP = (
     "Привет! Я исправляю русский текст. Режимы работы:\n\n"
     "/base <текст> — базовый режим (только LanguageTool)\n"
     "/legal <текст> — юридический режим (форматирование, кавычки, тире)\n"
-    "/strict <текст> — строгий режим (агрессивная нормализация)\n\n"
+    "/strict <текст> — строгий режим (агрессивная нормализация)\n"
+    "/typo <текст> — только типографика (кавычки, тире, пробелы)\n"
+    "/diff <текст> — юридический режим + файл с выделением изменений\n\n"
     "Без команды — режим по умолчанию (legal)."
 )
 
@@ -156,6 +160,47 @@ async def strict_mode(msg: Message):
         return
     fixed = run_correction(src, "strict")
     await msg.reply(fixed or "(пусто)")
+
+
+@dp.message(F.text.startswith("/typo"))
+async def typo_mode(msg: Message):
+    src = msg.text[len("/typo") :].strip()
+    if not src:
+        await msg.reply("Пожалуйста, укажите текст для проверки")
+        return
+    fixed = run_correction(src, "typo")
+    await msg.reply(fixed or "(пусто)")
+
+
+@dp.message(F.text.startswith("/diff"))
+async def diff_mode(msg: Message):
+    src = msg.text[len("/diff") :].strip()
+    if not src:
+        await msg.reply("Пожалуйста, укажите текст для проверки")
+        return
+
+    corrected = run_correction(src, "diff")
+    html_body = make_diff(src, corrected)
+
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", suffix=".html", delete=False
+    ) as f:
+        f.write("<meta charset='utf-8'>\n" + html_body)
+        temp_path = f.name
+
+    try:
+        from aiogram.types import FSInputFile
+
+        await bot.send_document(
+            msg.chat.id,
+            FSInputFile(temp_path, filename="diff.html"),
+            caption="Изменения выделены цветом",
+        )
+    finally:
+        try:
+            os.unlink(temp_path)
+        except OSError:
+            pass
 
 
 @dp.message()
