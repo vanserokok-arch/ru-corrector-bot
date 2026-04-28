@@ -49,11 +49,19 @@ class TestTypograph:
         test_cases = [
             ("ст. 10", f"ст.{NBSP}10"),
             ("п. 5", f"п.{NBSP}5"),
+            ("пп. 2", f"пп.{NBSP}2"),
+            ("ч. 1", f"ч.{NBSP}1"),
             ("г. 2025", f"г.{NBSP}2025"),
         ]
         for input_text, expected in test_cases:
             result = typograph(input_text)
             assert expected in result
+
+    def test_rubles_nbsp(self):
+        """Test non-breaking space before руб."""
+        text = "Сумма 100 руб."
+        result = typograph(text)
+        assert f"100{NBSP}руб." in result
 
     def test_double_spaces_cleanup(self):
         """Test double space cleanup."""

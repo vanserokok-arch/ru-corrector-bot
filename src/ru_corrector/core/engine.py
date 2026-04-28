@@ -1,7 +1,6 @@
 """Core correction engine."""
 
 import re
-from typing import Union
 
 from ..core.models import CorrectionResult, Mode, TextEdit
 from ..logging_config import get_logger
@@ -11,6 +10,7 @@ from ..services.diff_view import make_diff
 logger = get_logger(__name__)
 
 NBSP = "\u00a0"
+LEGAL_NUMERO_PATTERN = r"№ +([0-9A-Za-zА-Яа-яЁё][0-9A-Za-zА-Яа-яЁё/-]*)"
 
 
 class CorrectionEngine:
@@ -24,6 +24,64 @@ class CorrectionEngine:
             provider: Optional custom provider (for testing). Defaults to LanguageToolProvider.
         """
         self.provider = provider or LanguageToolProvider()
+
+    @staticmethod
+    def _is_dash_boundary_char(ch: str) -> bool:
+        return bool(ch) and (ch.isalpha() or ch in "«»()")
+
+    def _replace_safe_spaced_hyphen(self, text: str) -> tuple[str, list[TextEdit]]:
+        """Replace ` - ` with em-dash only in safe word contexts."""
+        edits: list[TextEdit] = []
+        out: list[str] = []
+        i = 0
+
+        while i < len(text):
+            if i > 0 and i + 1 < len(text) and text[i] == "-" and text[i - 1] == " " and text[i + 1] == " ":
+                left = text[i - 2] if i - 2 >= 0 else ""
+                right = text[i + 2] if i + 2 < len(text) else ""
+                if self._is_dash_boundary_char(left) and self._is_dash_boundary_char(right):
+                    if out and out[-1] == " ":
+                        out.pop()
+                    replacement = " — "
+                    out.append(replacement)
+                    edits.append(
+                        TextEdit(
+                            offset=len("".join(out)) - len(replacement),
+                            length=3,
+                            original=" - ",
+                            replacement=replacement,
+                            message="Convert to em-dash",
+                            rule_id="EM_DASH",
+                        )
+                    )
+                    i += 2
+                    continue
+            out.append(text[i])
+            i += 1
+
+        return "".join(out), edits
+
+    @staticmethod
+    def _strip_spaces_before_punctuation(text: str) -> str:
+        punctuation = ".,;:!?"
+        out: list[str] = []
+        for ch in text:
+            if ch in punctuation:
+                while out and out[-1] == " ":
+                    out.pop()
+            out.append(ch)
+        return "".join(out)
+
+    @staticmethod
+    def _strip_spaces_inside_pairs(text: str) -> str:
+        out: list[str] = []
+        for i, ch in enumerate(text):
+            if ch == " " and i > 0 and text[i - 1] in '(«"':
+                continue
+            if ch == " " and i + 1 < len(text) and text[i + 1] in ')»"':
+                continue
+            out.append(ch)
+        return "".join(out)
 
     def normalize(self, text: str) -> str:
         """
@@ -137,35 +195,9 @@ class CorrectionEngine:
                 t = t[: match.start() + offset] + replacement + t[match.end() + offset :]
                 offset += len(replacement) - len(original)
         
-        # Convert dash between words to em-dash
-        # Reset offset and work on new text
-        text_for_dash = t
-        t_new = ""
-        offset = 0
-        
-        for match in re.finditer(r"(?<=\w)\s*-\s*(?=\w)", text_for_dash):
-            t_new += text_for_dash[offset : match.start()]
-            original = match.group(0)
-            replacement = " — "
-            t_new += replacement
-            
-            if original != replacement:
-                actual_offset = len(t_new) - len(replacement)
-                edits.append(
-                    TextEdit(
-                        offset=actual_offset,
-                        length=len(original),
-                        original=original,
-                        replacement=replacement,
-                        message="Convert to em-dash",
-                        rule_id="EM_DASH",
-                    )
-                )
-            
-            offset = match.end()
-        
-        t_new += text_for_dash[offset:]
-        t = t_new
+        # Convert spaced hyphen between words to em-dash (safe contexts only)
+        t, dash_edits = self._replace_safe_spaced_hyphen(t)
+        edits.extend(dash_edits)
         
         # Fix double/multiple spaces (but preserve single spaces)
         t = re.sub(r"  +", " ", t)
@@ -174,6 +206,36 @@ class CorrectionEngine:
         t = re.sub(r" +([.,;:!?])", r"\1", t)
         
         return t, edits
+
+    def apply_legal_typography(self, text: str) -> str:
+        """
+        Apply legal typography rules without changing semantics.
+
+        Rules:
+        - Non-breaking spaces for legal references: ст., п., пп., ч.
+        - Non-breaking space after №
+        - Non-breaking space in "г. 2026"
+        - Non-breaking space before "руб."
+        """
+        t = text
+
+        # Legal references: ст. 15, п. 2.1, пп. 3, ч. 1
+        t = re.sub(r"\b(ст|пп|п|ч)\. +(\d+(?:\.\d+)*)", rf"\1.{NBSP}\2", t, flags=re.IGNORECASE)
+
+        # Number sign: № 123/2026, № А56-12345/2026
+        t = re.sub(
+            LEGAL_NUMERO_PATTERN,
+            rf"№{NBSP}\1",
+            t,
+        )
+
+        # Year abbreviation: г. 2026
+        t = re.sub(r"\bг\. +(\d{4})\b", rf"г.{NBSP}\1", t, flags=re.IGNORECASE)
+
+        # Rubles: 100 руб.
+        t = re.sub(r"(\d)\s*руб\.", rf"\1{NBSP}руб.", t, flags=re.IGNORECASE)
+
+        return t
 
     def apply_strict_rules(self, text: str) -> str:
         """
@@ -191,11 +253,26 @@ class CorrectionEngine:
         """
         t = text
         
+        # Collapse extra spaces/tabs
+        t = re.sub(r"[ \t]{2,}", " ", t)
+
+        # Remove spaces before punctuation
+        t = self._strip_spaces_before_punctuation(t)
+
+        # Ensure space after punctuation if followed by a word/quote/bracket
+        t = re.sub(r"([.,;:!?])([А-Яа-яA-Za-zЁё«\"(])", r"\1 \2", t)
+
         # Normalize multiple newlines to max 2
         t = re.sub(r"\n{3,}", "\n\n", t)
-        
-        # Ensure space after punctuation if followed by word
-        t = re.sub(r"([.,;:!?])([А-Яа-яA-Za-z])", r"\1 \2", t)
+
+        # Normalize repeated punctuation
+        t = re.sub(r"\.{4,}", "...", t)
+        t = re.sub(r",{2,}", ",", t)
+        t = re.sub(r"!{2,}", "!", t)
+        t = re.sub(r"\?{2,}", "?", t)
+
+        # Remove accidental spaces inside brackets and quotes
+        t = self._strip_spaces_inside_pairs(t)
         
         return t
 
@@ -225,10 +302,6 @@ class CorrectionEngine:
             flags=re.IGNORECASE,
         )
         
-        # № and references
-        t = re.sub(r"№\s*(\d)", rf"№{NBSP}\1", t)
-        t = re.sub(r"\b(ст|п|г)\.\s*(\d+)", rf"\1.{NBSP}\2", t, flags=re.IGNORECASE)
-        
         # Clean up any remaining double spaces
         t = re.sub(r" {2,}", " ", t)
         
@@ -237,7 +310,7 @@ class CorrectionEngine:
     def correct(
         self,
         text: str,
-        mode: Union[Mode, str] = Mode.legal,
+        mode: Mode | str = Mode.legal,
     ) -> CorrectionResult:
         """
         Main correction pipeline.
@@ -275,7 +348,8 @@ class CorrectionEngine:
         if mode == Mode.typo:
             # Apply quote/dash rules locally (no network call)
             text_after_typo_rules, _ = self.apply_legal_rules(normalized)
-            final_text = self.apply_typography(text_after_typo_rules)
+            text_after_legal_typography = self.apply_legal_typography(text_after_typo_rules)
+            final_text = self.apply_typography(text_after_legal_typography)
             logger.info("Correction complete (typo mode): 0 LT edits")
             return CorrectionResult(text=final_text, edits=[])
 
@@ -296,13 +370,15 @@ class CorrectionEngine:
         if effective_mode in (Mode.legal, Mode.strict):
             text_after_legal, legal_edits = self.apply_legal_rules(text_after_provider)
             all_edits.extend(legal_edits)
+            text_after_legal_typography = self.apply_legal_typography(text_after_legal)
         else:
             text_after_legal = text_after_provider
+            text_after_legal_typography = text_after_legal
 
         if effective_mode == Mode.strict:
-            text_after_strict = self.apply_strict_rules(text_after_legal)
+            text_after_strict = self.apply_strict_rules(text_after_legal_typography)
         else:
-            text_after_strict = text_after_legal
+            text_after_strict = text_after_legal_typography
 
         # Step 4: Apply typography
         final_text = self.apply_typography(text_after_strict)

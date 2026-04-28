@@ -112,13 +112,13 @@ class TestCorrectEndpoint:
         assert "«привет»" in data["result"]
 
     def test_correct_dash_conversion(self):
-        """Test that legal mode converts dashes."""
+        """Test that legal mode converts spaced hyphen to dash."""
         response = client.post(
-            "/correct", json={"text": "Москва-Питер", "mode": "legal"}
+            "/correct", json={"text": "Москва - Питер", "mode": "legal"}
         )
         assert response.status_code == 200
         data = response.json()
-        assert "—" in data["result"]
+        assert "Москва — Питер" in data["result"]
 
     def test_correct_ellipsis(self):
         """Test that typography converts ellipsis."""
