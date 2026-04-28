@@ -273,6 +273,17 @@ class TestCorrectionModes:
         assert "!!" not in result
         assert " ." not in result
 
+    def test_mode_typo_applies_legal_typography(self):
+        """Test typo mode applies legal typography without language corrections."""
+        provider = MockProvider([])
+        engine = CorrectionEngine(provider=provider)
+
+        text = "ст. 15 ГК РФ"
+        result, edits = engine.correct(text, mode="typo")
+
+        assert "ст.\u00a015" in result
+        assert edits == []
+
     def test_legal_mode_date_and_references(self):
         """Test legal mode keeps dates and formats references."""
         provider = MockProvider([])
