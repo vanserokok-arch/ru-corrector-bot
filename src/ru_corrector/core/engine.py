@@ -3,9 +3,10 @@
 import re
 from typing import Union
 
-from ..core.models import Mode, TextEdit
+from ..core.models import CorrectionResult, Mode, TextEdit
 from ..logging_config import get_logger
 from ..providers.languagetool import LanguageToolProvider
+from ..services.diff_view import make_diff
 
 logger = get_logger(__name__)
 
@@ -237,7 +238,7 @@ class CorrectionEngine:
         self,
         text: str,
         mode: Union[Mode, str] = Mode.legal,
-    ) -> tuple[str, list[TextEdit]]:
+    ) -> CorrectionResult:
         """
         Main correction pipeline.
 
@@ -247,15 +248,14 @@ class CorrectionEngine:
         * **base**   — normalize → LanguageTool → typography
         * **legal**  — normalize → LanguageTool → legal rules → typography  (default)
         * **strict** — normalize → LanguageTool → legal rules → strict rules → typography
-        * **diff**   — identical to *legal*; the caller is responsible for computing
-                       the HTML diff from the original text and the returned corrected text.
+        * **diff**   — same corrections as *legal* + HTML diff generated internally
 
         Args:
             text: Text to correct
             mode: Correction mode (base, legal, strict, typo, diff)
 
         Returns:
-            Tuple of (corrected_text, list of edits)
+            CorrectionResult with corrected text, list of edits, and optional diff_html
         """
         # Normalise string value from API/env to enum when needed
         if isinstance(mode, str):
@@ -277,7 +277,7 @@ class CorrectionEngine:
             text_after_typo_rules, _ = self.apply_legal_rules(normalized)
             final_text = self.apply_typography(text_after_typo_rules)
             logger.info("Correction complete (typo mode): 0 LT edits")
-            return final_text, []
+            return CorrectionResult(text=final_text, edits=[])
 
         # ---- base / legal / strict / diff ----
 
@@ -312,4 +312,10 @@ class CorrectionEngine:
 
         logger.info(f"Correction complete: {len(final_edits)} edits made")
 
-        return final_text, final_edits
+        # Step 6: Generate diff HTML when mode is diff
+        diff_html: str | None = None
+        if mode == Mode.diff:
+            diff_html = make_diff(text, final_text)
+            logger.debug("Diff HTML generated")
+
+        return CorrectionResult(text=final_text, edits=final_edits, diff_html=diff_html)
