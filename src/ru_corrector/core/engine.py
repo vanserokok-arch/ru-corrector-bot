@@ -183,10 +183,29 @@ class CorrectionEngine:
         - Convert straight quotes "" to Russian quotes «»
         - Convert dash between words to em-dash with spaces
         """
-        t = text
-        t = re.sub(r'"([^"\n]+)"', r"«\1»", t)
-        t = re.sub(r"(?<=\w)\s*-\s*(?=\w)", " — ", t)
-        return t
+        t = re.sub(r'"([^"\n]+)"', r"«\1»", text)
+        result: list[str] = []
+        i = 0
+        while i < len(t):
+            if t[i] == "-":
+                left = i - 1
+                while left >= 0 and t[left] in (" ", "\t"):
+                    left -= 1
+                right = i + 1
+                while right < len(t) and t[right] in (" ", "\t"):
+                    right += 1
+
+                if left >= 0 and right < len(t) and t[left].isalnum() and t[right].isalnum():
+                    while result and result[-1] in (" ", "\t"):
+                        result.pop()
+                    result.extend([" ", "—", " "])
+                    i = right
+                    continue
+
+            result.append(t[i])
+            i += 1
+
+        return "".join(result)
 
     def apply_strict_rules(self, text: str) -> str:
         """
