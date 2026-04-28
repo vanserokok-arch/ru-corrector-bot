@@ -154,6 +154,7 @@ class TestStrictRules:
         text = "1)Первый пункт\n2)Второй пункт\n\n3)Третий пункт"
         result = engine.apply_strict_rules(text)
         assert result.count("\n") == text.count("\n")
+        assert "1)Первый пункт" in result
         assert "1) Первый пункт" not in result
 
 

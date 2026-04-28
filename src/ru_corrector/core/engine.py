@@ -204,7 +204,7 @@ class CorrectionEngine:
             line_ending_len = len(line) - len(line.rstrip("\r\n"))
             line_body = line[:-line_ending_len] if line_ending_len else line
             line_ending = line[-line_ending_len:] if line_ending_len else ""
-            line_body = re.sub(r"([.,;:!?])(?=[^\s])", r"\1 ", line_body)
+            line_body = re.sub(r"([.,;:!?])(?=[A-Za-zА-Яа-яЁё])", r"\1 ", line_body)
             normalized_lines.append(line_body + line_ending)
 
         return "".join(normalized_lines)
