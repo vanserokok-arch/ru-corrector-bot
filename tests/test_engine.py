@@ -289,6 +289,14 @@ class TestCorrectionModes:
         # Should have non-breaking space before г.
         assert "г.\u00a0" in result or "г." in result
 
+    def test_mode_typo_applies_legal_typography(self):
+        """Test that typo mode applies legal typography (NBSP in references)."""
+        provider = MockProvider([])
+        engine = CorrectionEngine(provider=provider)
+        text = "ст. 15 ГК РФ"
+        result, edits = engine.correct(text, mode="typo")
+        assert "ст.\u00a015" in result
+
 
 class TestDeterministicBehavior:
     """Test that engine produces deterministic results."""
