@@ -19,24 +19,22 @@ def mock_languagetool(monkeypatch):
             self.message = message
             self.ruleId = rule_id
 
-    class MockMatches:
-        """Mock LanguageTool matches."""
-
-        def __init__(self, matches):
-            self.matches = matches
-
     class MockLanguageTool:
-        """Mock LanguageTool client."""
+        """Mock LanguageTool client.
+
+        check() returns a plain list[MockMatch], mirroring the real
+        LanguageTool.check() return type.
+        """
 
         def check(self, text):
-            # Return empty matches for most text
-            # Add specific rules for test cases if needed
-            return MockMatches([])
+            # Return empty list for most text
+            # Tests that need specific corrections inject their own MockProvider
+            return []
 
         def close(self):
             pass
 
-    # Mock the _get_languagetool function
+    # Mock the _get_languagetool function in both modules
     mock_lt = MockLanguageTool()
 
     def mock_get_lt():
@@ -48,7 +46,7 @@ def mock_languagetool(monkeypatch):
         monkeypatch.setattr(old_corrector, "_get_languagetool", mock_get_lt)
     except (ImportError, AttributeError):
         pass
-    
+
     try:
         import ru_corrector.providers.languagetool as lt_provider
         monkeypatch.setattr(lt_provider, "_get_languagetool", mock_get_lt)

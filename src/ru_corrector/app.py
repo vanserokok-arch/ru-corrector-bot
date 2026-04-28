@@ -4,7 +4,6 @@ import time
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import field_validator
 
 from .api.schemas import CorrectionRequest, CorrectionResponse, Edit, HealthResponse, Stats
 from .config import config
@@ -25,20 +24,6 @@ app = FastAPI(
 
 # Initialize correction engine
 engine = CorrectionEngine()
-
-
-# Add validation to request model
-def validate_text_length(v: str) -> str:
-    """Validate text length."""
-    if len(v) > config.MAX_TEXT_LEN:
-        raise ValueError(f"Text too long. Maximum length is {config.MAX_TEXT_LEN} characters")
-    return v
-
-
-# Patch the request model with validation
-CorrectionRequest.model_fields["text"].metadata = [
-    field_validator("text")(classmethod(validate_text_length))
-]
 
 
 @app.middleware("http")

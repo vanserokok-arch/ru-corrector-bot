@@ -52,10 +52,17 @@ def apply_languagetool(text: str) -> str:
     """Apply LanguageTool corrections to text."""
     logger.debug("Checking text with LanguageTool")
     lt = _get_languagetool()
-    matches = lt.check(text)
+
+    try:
+        # lt.check() returns list[Match] directly
+        matches = lt.check(text)
+    except Exception as exc:
+        logger.warning(f"LanguageTool check failed, skipping corrections: {exc}")
+        return text
+
     corrections = []
 
-    for m in matches.matches:
+    for m in matches:
         if not m.replacements:
             continue
         start = m.offset
