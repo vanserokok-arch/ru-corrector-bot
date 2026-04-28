@@ -182,16 +182,19 @@ class CorrectionEngine:
         Rules:
         - Convert straight quotes "" to Russian quotes «»
         - Convert dash between words to em-dash with spaces
+
+        Returns:
+            Text with legal typography applied
         """
         t = re.sub(r'"([^"\n]+)"', r"«\1»", text)
         result: list[str] = []
-        i = 0
-        while i < len(t):
-            if t[i] == "-":
-                left = i - 1
+        char_index = 0
+        while char_index < len(t):
+            if t[char_index] == "-":
+                left = char_index - 1
                 while left >= 0 and t[left] in (" ", "\t"):
                     left -= 1
-                right = i + 1
+                right = char_index + 1
                 while right < len(t) and t[right] in (" ", "\t"):
                     right += 1
 
@@ -199,11 +202,11 @@ class CorrectionEngine:
                     while result and result[-1] in (" ", "\t"):
                         result.pop()
                     result.extend([" ", "—", " "])
-                    i = right
+                    char_index = right
                     continue
 
-            result.append(t[i])
-            i += 1
+            result.append(t[char_index])
+            char_index += 1
 
         return "".join(result)
 
