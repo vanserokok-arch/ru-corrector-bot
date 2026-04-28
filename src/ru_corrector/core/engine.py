@@ -11,6 +11,14 @@ from ..services.diff_view import make_diff
 logger = get_logger(__name__)
 
 NBSP = "\u00a0"
+LEGAL_NUMBER_PART = r"\d+[A-Za-zА-Яа-яЁё]?"
+LEGAL_COMPLEX_NUMBER = rf"{LEGAL_NUMBER_PART}(?:[./-]{LEGAL_NUMBER_PART}){{0,10}}"
+LEGAL_REFERENCE_RX = re.compile(
+    rf"\b(ст|п|ч|г)\.\s*({LEGAL_COMPLEX_NUMBER})",
+    flags=re.IGNORECASE,
+)
+NUMERO_RX = re.compile(rf"№\s*({LEGAL_COMPLEX_NUMBER})")
+SAFE_DASH_RX = re.compile(r"(?<=[A-Za-zА-Яа-яЁё]) - (?=[A-Za-zА-Яа-яЁё])")
 
 
 class CorrectionEngine:
@@ -143,7 +151,7 @@ class CorrectionEngine:
         t_new = ""
         offset = 0
         
-        for match in re.finditer(r"(?<=\w)\s*-\s*(?=\w)", text_for_dash):
+        for match in SAFE_DASH_RX.finditer(text_for_dash):
             t_new += text_for_dash[offset : match.start()]
             original = match.group(0)
             replacement = " — "
@@ -179,9 +187,9 @@ class CorrectionEngine:
         """
         Apply strict normalization rules.
         
-        Additional aggressive rules:
-        - More aggressive whitespace normalization
-        - Normalize multiple newlines
+        Additional strict rules:
+        - Work inside each line without changing line breaks
+        - Ensure a space after punctuation inside a line
         
         Args:
             text: Text to process
@@ -191,13 +199,15 @@ class CorrectionEngine:
         """
         t = text
         
-        # Normalize multiple newlines to max 2
-        t = re.sub(r"\n{3,}", "\n\n", t)
-        
-        # Ensure space after punctuation if followed by word
-        t = re.sub(r"([.,;:!?])([А-Яа-яA-Za-z])", r"\1 \2", t)
-        
-        return t
+        normalized_lines: list[str] = []
+        for line in t.splitlines(keepends=True):
+            line_ending_len = len(line) - len(line.rstrip("\r\n"))
+            line_body = line[:-line_ending_len] if line_ending_len else line
+            line_ending = line[-line_ending_len:] if line_ending_len else ""
+            line_body = re.sub(r"([.,;:!?])(?=[A-Za-zА-Яа-яЁё])", r"\1 ", line_body)
+            normalized_lines.append(line_body + line_ending)
+
+        return "".join(normalized_lines)
 
     def apply_typography(self, text: str) -> str:
         """
@@ -225,13 +235,24 @@ class CorrectionEngine:
             flags=re.IGNORECASE,
         )
         
-        # № and references
-        t = re.sub(r"№\s*(\d)", rf"№{NBSP}\1", t)
-        t = re.sub(r"\b(ст|п|г)\.\s*(\d+)", rf"\1.{NBSP}\2", t, flags=re.IGNORECASE)
-        
         # Clean up any remaining double spaces
         t = re.sub(r" {2,}", " ", t)
         
+        return t
+
+    def apply_legal_typography(self, text: str) -> str:
+        """
+        Apply legal-specific typography rules.
+
+        Args:
+            text: Text to process
+
+        Returns:
+            Text with legal typography applied
+        """
+        t = text
+        t = NUMERO_RX.sub(rf"№{NBSP}\1", t)
+        t = LEGAL_REFERENCE_RX.sub(rf"\1.{NBSP}\2", t)
         return t
 
     def correct(
@@ -303,9 +324,13 @@ class CorrectionEngine:
             text_after_strict = self.apply_strict_rules(text_after_legal)
         else:
             text_after_strict = text_after_legal
-
+        
         # Step 4: Apply typography
-        final_text = self.apply_typography(text_after_strict)
+        text_after_typography = self.apply_typography(text_after_strict)
+        if effective_mode in (Mode.legal, Mode.strict):
+            final_text = self.apply_legal_typography(text_after_typography)
+        else:
+            final_text = text_after_typography
 
         # Step 5: Deduplicate edits (for reporting)
         final_edits = self.deduplicate_edits(all_edits)
