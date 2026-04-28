@@ -65,5 +65,5 @@ class CorrectionResult:
     # Backward-compatibility: allow tuple-unpacking                        #
     #   corrected_text, edits = engine.correct(...)                        #
     # ------------------------------------------------------------------ #
-    def __iter__(self) -> Iterator:
+    def __iter__(self) -> Iterator[str | list[TextEdit]]:
         return iter((self.text, self.edits))

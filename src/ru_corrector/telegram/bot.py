@@ -191,7 +191,7 @@ async def diff_mode(msg: Message):
         return
 
     result = run_correction(src, Mode.diff)
-    if result is None:
+    if result is None or result.diff_html is None:
         await msg.reply("⚠️ Ошибка при обработке текста.")
         return
 
