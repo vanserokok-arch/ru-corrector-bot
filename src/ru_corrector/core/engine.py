@@ -12,7 +12,7 @@ logger = get_logger(__name__)
 
 NBSP = "\u00a0"
 LEGAL_NUMBER_PART = r"\d+[A-Za-zА-Яа-яЁё]?"
-LEGAL_COMPLEX_NUMBER = rf"{LEGAL_NUMBER_PART}(?:[./-]{LEGAL_NUMBER_PART})*"
+LEGAL_COMPLEX_NUMBER = rf"{LEGAL_NUMBER_PART}(?:[./-]{LEGAL_NUMBER_PART}){{0,10}}"
 LEGAL_REFERENCE_RX = re.compile(
     rf"\b(ст|п|ч|г)\.\s*({LEGAL_COMPLEX_NUMBER})",
     flags=re.IGNORECASE,
