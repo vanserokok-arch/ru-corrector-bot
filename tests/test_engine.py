@@ -84,19 +84,26 @@ class TestLegalRules:
         assert "«привет»" in result
         assert len(edits) > 0
 
-    def test_dash_conversion(self):
-        """Test dash conversion between words."""
+    def test_dash_in_hyphenated_word_preserved(self):
+        """Test that hyphen inside a word is preserved."""
         engine = CorrectionEngine(provider=MockProvider())
         text = "Москва-Питер"
         result, edits = engine.apply_legal_rules(text)
-        assert "Москва — Питер" in result
+        assert result == "Москва-Питер"
 
     def test_dash_with_spaces(self):
-        """Test dash conversion with spaces."""
+        """Test dash conversion only for word - word pattern."""
         engine = CorrectionEngine(provider=MockProvider())
         text = "Москва - Питер"
         result, edits = engine.apply_legal_rules(text)
         assert "Москва — Питер" in result
+
+    def test_north_west_hyphen_preserved(self):
+        """Test that Северо-западный is not modified."""
+        engine = CorrectionEngine(provider=MockProvider())
+        text = "Северо-западный округ"
+        result, edits = engine.apply_legal_rules(text)
+        assert result == text
 
     def test_double_spaces_removed(self):
         """Test that double spaces are removed."""
@@ -127,12 +134,12 @@ class TestLegalRules:
 class TestStrictRules:
     """Test strict normalization rules."""
 
-    def test_multiple_newlines_normalized(self):
-        """Test that multiple newlines are normalized."""
+    def test_multiple_newlines_preserved(self):
+        """Test that strict mode preserves original line breaks."""
         engine = CorrectionEngine(provider=MockProvider())
         text = "Строка 1\n\n\n\nСтрока 2"
         result = engine.apply_strict_rules(text)
-        assert "\n\n\n" not in result
+        assert result == text
 
     def test_space_after_punctuation(self):
         """Test that space is added after punctuation."""
@@ -140,6 +147,15 @@ class TestStrictRules:
         text = "Текст.Продолжение"
         result = engine.apply_strict_rules(text)
         assert "Текст. Продолжение" in result
+
+    def test_strict_keeps_list_block_structure(self):
+        """Test that strict mode keeps list structure and newlines."""
+        engine = CorrectionEngine(provider=MockProvider())
+        text = "1)Первый пункт\n2)Второй пункт\n\n3)Третий пункт"
+        result = engine.apply_strict_rules(text)
+        assert result.count("\n") == text.count("\n")
+        assert "1)Первый пункт" in result
+        assert "1) Первый пункт" not in result
 
 
 class TestTypography:
@@ -171,15 +187,43 @@ class TestTypography:
         """Test non-breaking space with №."""
         engine = CorrectionEngine(provider=MockProvider())
         text = "№ 123"
-        result = engine.apply_typography(text)
+        result = engine.apply_legal_typography(text)
         assert "№\u00a0123" in result
 
     def test_article_references(self):
         """Test non-breaking space with article references."""
         engine = CorrectionEngine(provider=MockProvider())
         text = "ст. 10"
-        result = engine.apply_typography(text)
+        result = engine.apply_legal_typography(text)
         assert "ст.\u00a010" in result
+
+    def test_article_with_letter_suffix(self):
+        """Test legal reference with letter suffix."""
+        engine = CorrectionEngine(provider=MockProvider())
+        text = "ст. 15а ГК РФ"
+        result = engine.apply_legal_typography(text)
+        assert "ст.\u00a015а ГК РФ" in result
+
+    def test_nested_legal_references(self):
+        """Test nested legal references."""
+        engine = CorrectionEngine(provider=MockProvider())
+        text = "ч. 3 ст. 15"
+        result = engine.apply_legal_typography(text)
+        assert "ч.\u00a03 ст.\u00a015" == result
+
+    def test_complex_point_number(self):
+        """Test complex point number in legal reference."""
+        engine = CorrectionEngine(provider=MockProvider())
+        text = "п. 2.1 договора"
+        result = engine.apply_legal_typography(text)
+        assert "п.\u00a02.1 договора" == result
+
+    def test_numero_does_not_capture_date(self):
+        """Test numero capture does not include trailing date."""
+        engine = CorrectionEngine(provider=MockProvider())
+        text = "№ 123/2026 от 01.01.2026"
+        result = engine.apply_legal_typography(text)
+        assert result == "№\u00a0123/2026 от 01.01.2026"
 
 
 class TestCorrectionModes:
@@ -205,7 +249,7 @@ class TestCorrectionModes:
         provider = MockProvider([])
         engine = CorrectionEngine(provider=provider)
         
-        text = 'Текст "в кавычках" и дефис-тире'
+        text = 'Текст "в кавычках" и дефис - тире'
         result, edits = engine.correct(text, mode="legal")
         
         # Should apply legal rules
@@ -222,7 +266,15 @@ class TestCorrectionModes:
         
         # Should apply legal and strict rules
         assert "«в кавычках»" in result
-        assert "\n\n\n\n" not in result
+        assert "\n\n\n\n" in result
+
+    def test_mode_base_does_not_apply_legal_typography(self):
+        """Test that base mode does not apply legal-specific typography."""
+        provider = MockProvider([])
+        engine = CorrectionEngine(provider=provider)
+        text = "ст. 15а"
+        result, edits = engine.correct(text, mode="base")
+        assert "ст. 15а" in result
 
     def test_legal_mode_date_normalization(self):
         """Test that legal mode handles dates correctly."""
@@ -236,6 +288,14 @@ class TestCorrectionModes:
         assert "01.01.2026" in result
         # Should have non-breaking space before г.
         assert "г.\u00a0" in result or "г." in result
+
+    def test_mode_typo_applies_legal_typography(self):
+        """Test that typo mode applies legal typography (NBSP in references)."""
+        provider = MockProvider([])
+        engine = CorrectionEngine(provider=provider)
+        text = "ст. 15 ГК РФ"
+        result, edits = engine.correct(text, mode="typo")
+        assert "ст.\u00a015" in result
 
 
 class TestDeterministicBehavior:
