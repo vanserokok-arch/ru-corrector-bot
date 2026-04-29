@@ -38,6 +38,18 @@ class Config(BaseSettings):
         default="ru-RU", description="LanguageTool language code"
     )
 
+    # OpenAI refiner (optional)
+    OPENAI_API_KEY: str | None = Field(default=None, description="OpenAI API key")
+    ENABLE_OPENAI_REFINER: bool = Field(
+        default=False, description="Enable optional OpenAI legal text refiner"
+    )
+    OPENAI_REFINER_MODEL: str = Field(
+        default="gpt-4o-mini", description="OpenAI model for legal refiner"
+    )
+    OPENAI_REFINER_TEMPERATURE: float = Field(
+        default=0.1, description="OpenAI legal refiner temperature"
+    )
+
     # Correction options
     ENABLE_YO_REPLACEMENT: bool = Field(
         default=False, description="Enable ё replacement in corrections"

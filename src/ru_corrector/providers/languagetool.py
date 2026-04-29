@@ -66,11 +66,14 @@ class LanguageToolProvider(CorrectionProvider):
             if not m.replacements:
                 continue
 
+            first = m.replacements[0]
+            replacement = first.value if hasattr(first, "value") else str(first)
+
             edit = TextEdit(
                 offset=m.offset,
                 length=m.errorLength,
                 original=text[m.offset : m.offset + m.errorLength],
-                replacement=m.replacements[0].value,
+                replacement=replacement,
                 message=m.message or "",
                 rule_id=m.ruleId or "",
             )
