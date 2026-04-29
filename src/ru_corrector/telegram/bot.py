@@ -7,7 +7,9 @@ Run separately from the API: python -m ru_corrector.telegram.bot
 
 import asyncio
 import atexit
+import io
 import os
+import re
 import signal
 import sys
 import tempfile
@@ -100,6 +102,7 @@ dp = Dispatcher()
 
 # Initialize correction engine
 engine = CorrectionEngine()
+collect_buffers: dict[int, list[str]] = {}
 
 HELP = (
     "Привет! Я исправляю русский текст. Режимы работы:\n\n"
@@ -112,13 +115,92 @@ HELP = (
 )
 
 
+def split_telegram_message(text: str, limit: int = 3900) -> list[str]:
+    """Split text into Telegram-safe chunks preferring paragraphs/sentences/words."""
+    if not text:
+        return [""]
+    if len(text) <= limit:
+        return [text]
+
+    def find_cut_index(chunk: str, max_len: int) -> int:
+        window = chunk[:max_len]
+
+        paragraph_cut = window.rfind("\n\n")
+        if paragraph_cut > 0:
+            return paragraph_cut + 2
+
+        newline_cut = window.rfind("\n")
+        if newline_cut > 0:
+            return newline_cut + 1
+
+        sentence_matches = list(re.finditer(r"[.!?…](?:\s|$)", window))
+        if sentence_matches:
+            sentence_cut = sentence_matches[-1].start() + 1
+            if sentence_cut > 0:
+                return sentence_cut
+
+        space_cut = window.rfind(" ")
+        if space_cut > 0:
+            return space_cut
+
+        return max_len
+
+    parts: list[str] = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= limit:
+            parts.append(remaining)
+            break
+
+        cut = find_cut_index(remaining, limit)
+        if cut <= 0:
+            cut = limit
+
+        part = remaining[:cut]
+        if part:
+            parts.append(part)
+        remaining = remaining[cut:]
+
+    return parts or [text[:limit]]
+
+
+async def send_text_in_parts(msg: Message, text: str, limit: int = 3900) -> None:
+    """Send text in one or more Telegram messages with numbering for long outputs."""
+    parts = split_telegram_message(text, limit=limit)
+    logger.info(
+        f"Telegram output split: output_length={len(text)} chunks={len(parts)} limit={limit}"
+    )
+    if len(parts) == 1:
+        await msg.reply(parts[0] or "(пусто)")
+        return
+
+    total = len(parts)
+    for idx, part in enumerate(parts, start=1):
+        await msg.reply(f"Часть {idx}/{total}\n{part or '(пусто)'}")
+
+
 def run_correction(text: str, mode: Mode = Mode.legal) -> CorrectionResult | None:
     """Run correction engine and return CorrectionResult, or None on error."""
     try:
-        return engine.correct(text, mode=mode)
+        logger.info(f"Full input length before engine: {len(text)} mode={mode}")
+        result = engine.correct(text, mode=mode)
+        logger.info(f"Full output length after engine: {len(result.text)} mode={mode}")
+        return result
     except Exception as e:
         logger.error(f"Error in correction: {e}", exc_info=True)
         return None
+
+
+def _extract_command_text(full_text: str, command: str) -> str:
+    """Extract command payload without dropping multiline content."""
+    if not full_text.startswith(command):
+        return full_text
+    payload = full_text[len(command) :]
+    if payload.startswith(" "):
+        payload = payload[1:]
+    if payload.startswith("\n"):
+        payload = payload[1:]
+    return payload
 
 
 @dp.message(F.text.startswith("/start"))
@@ -128,12 +210,79 @@ async def start(msg: Message):
 
 @dp.message(F.text.startswith("/help"))
 async def help_cmd(msg: Message):
-    await msg.reply(HELP)
+    await msg.reply(
+        HELP
+        + "\n\n"
+        + "Для больших текстов:\n"
+        + "/collect — начать сбор частей\n"
+        + "/done — обработать собранный текст\n"
+        + "/cancel — очистить буфер\n"
+        + "Также можно отправить .txt файл."
+    )
+
+
+@dp.message(F.text.startswith("/collect"))
+async def collect_start(msg: Message):
+    if not msg.from_user:
+        await msg.reply("⚠️ Не удалось определить пользователя.")
+        return
+    user_id = msg.from_user.id
+    collect_buffers[user_id] = []
+    logger.info(f"Collect started user_id={user_id}")
+    await msg.reply(
+        "Режим сбора включён. Отправляйте текст частями. "
+        "Когда закончите, отправьте /done. Для отмены — /cancel."
+    )
+
+
+@dp.message(F.text.startswith("/cancel"))
+async def collect_cancel(msg: Message):
+    if not msg.from_user:
+        await msg.reply("⚠️ Не удалось определить пользователя.")
+        return
+    user_id = msg.from_user.id
+    removed = len(collect_buffers.pop(user_id, []))
+    logger.info(f"Collect cancelled user_id={user_id} removed_parts={removed}")
+    await msg.reply("Буфер очищен.")
+
+
+@dp.message(F.text.startswith("/done"))
+async def collect_done(msg: Message):
+    if not msg.from_user:
+        await msg.reply("⚠️ Не удалось определить пользователя.")
+        return
+    user_id = msg.from_user.id
+    parts = collect_buffers.get(user_id, [])
+    if not parts:
+        await msg.reply("Буфер пуст. Используйте /collect и отправьте части текста.")
+        return
+
+    full_text = "\n\n".join(parts)
+    logger.info(
+        f"Collect done user_id={user_id} parts={len(parts)} input_length={len(full_text)}"
+    )
+
+    try:
+        default_mode = Mode(config.DEFAULT_MODE) if config.DEFAULT_MODE else Mode.legal
+    except ValueError:
+        default_mode = Mode.legal
+
+    result = run_correction(full_text, default_mode)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+
+    collect_buffers.pop(user_id, None)
+    logger.info(
+        f"Collect output user_id={user_id} output_length={len(result.text)} "
+        f"parts={len(split_telegram_message(result.text or '(пусто)'))}"
+    )
+    await send_text_in_parts(msg, result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/base"))
 async def base_mode(msg: Message):
-    src = msg.text[len("/base") :].strip()
+    src = _extract_command_text(msg.text, "/base")
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
@@ -141,12 +290,12 @@ async def base_mode(msg: Message):
     if result is None:
         await msg.reply("⚠️ Ошибка при обработке текста.")
         return
-    await msg.reply(result.text or "(пусто)")
+    await send_text_in_parts(msg, result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/legal"))
 async def legal_mode(msg: Message):
-    src = msg.text[len("/legal") :].strip()
+    src = _extract_command_text(msg.text, "/legal")
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
@@ -154,12 +303,12 @@ async def legal_mode(msg: Message):
     if result is None:
         await msg.reply("⚠️ Ошибка при обработке текста.")
         return
-    await msg.reply(result.text or "(пусто)")
+    await send_text_in_parts(msg, result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/strict"))
 async def strict_mode(msg: Message):
-    src = msg.text[len("/strict") :].strip()
+    src = _extract_command_text(msg.text, "/strict")
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
@@ -167,12 +316,12 @@ async def strict_mode(msg: Message):
     if result is None:
         await msg.reply("⚠️ Ошибка при обработке текста.")
         return
-    await msg.reply(result.text or "(пусто)")
+    await send_text_in_parts(msg, result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/typo"))
 async def typo_mode(msg: Message):
-    src = msg.text[len("/typo") :].strip()
+    src = _extract_command_text(msg.text, "/typo")
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
@@ -180,12 +329,12 @@ async def typo_mode(msg: Message):
     if result is None:
         await msg.reply("⚠️ Ошибка при обработке текста.")
         return
-    await msg.reply(result.text or "(пусто)")
+    await send_text_in_parts(msg, result.text or "(пусто)")
 
 
 @dp.message(F.text.startswith("/diff"))
 async def diff_mode(msg: Message):
-    src = msg.text[len("/diff") :].strip()
+    src = _extract_command_text(msg.text, "/diff")
     if not src:
         await msg.reply("Пожалуйста, укажите текст для проверки")
         return
@@ -216,6 +365,50 @@ async def diff_mode(msg: Message):
             pass
 
 
+@dp.message(F.document)
+async def txt_document_mode(msg: Message):
+    """Handle uploaded .txt document and process full text."""
+    if not msg.document:
+        return
+
+    filename = (msg.document.file_name or "").lower()
+    if not filename.endswith(".txt"):
+        await msg.reply("Поддерживаются только .txt файлы.")
+        return
+
+    try:
+        file = await bot.get_file(msg.document.file_id)
+        buffer = io.BytesIO()
+        await bot.download_file(file.file_path, destination=buffer)
+        raw = buffer.getvalue()
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        await msg.reply("Не удалось прочитать файл как UTF-8.")
+        return
+    except Exception as e:
+        logger.error(f"Failed to read txt document: {e}", exc_info=True)
+        await msg.reply("⚠️ Ошибка при чтении файла.")
+        return
+
+    logger.info(f"TXT input length={len(text)} filename={filename}")
+
+    try:
+        default_mode = Mode(config.DEFAULT_MODE) if config.DEFAULT_MODE else Mode.legal
+    except ValueError:
+        default_mode = Mode.legal
+
+    result = run_correction(text, default_mode)
+    if result is None:
+        await msg.reply("⚠️ Ошибка при обработке текста.")
+        return
+
+    logger.info(
+        f"TXT output length={len(result.text)} "
+        f"parts={len(split_telegram_message(result.text or '(пусто)'))}"
+    )
+    await send_text_in_parts(msg, result.text or "(пусто)")
+
+
 @dp.message()
 async def default_handler(msg: Message):
     """Handle messages without command."""
@@ -227,11 +420,24 @@ async def default_handler(msg: Message):
     except ValueError:
         default_mode = Mode.legal
 
+    if msg.from_user and msg.from_user.id in collect_buffers:
+        user_id = msg.from_user.id
+        collect_buffers[user_id].append(msg.text)
+        logger.info(
+            f"Collect append user_id={user_id} parts={len(collect_buffers[user_id])} "
+            f"last_part_length={len(msg.text)}"
+        )
+        await msg.reply(
+            f"Часть добавлена. Всего частей: {len(collect_buffers[user_id])}. "
+            "Отправьте /done для обработки."
+        )
+        return
+
     result = run_correction(msg.text, default_mode)
     if result is None:
         await msg.reply("⚠️ Ошибка при обработке текста.")
         return
-    await msg.reply(result.text or "(пусто)")
+    await send_text_in_parts(msg, result.text or "(пусто)")
 
 
 async def get_bot_info():
