@@ -96,7 +96,7 @@ def test_detect_money_entities_explicit_amount():
 
 
 def test_detect_money_entities_verb_window_amount():
-    spans = detect_money_entities("прошу взыскать расходы на оплату услуг юриста 40000")
+    spans = detect_money_entities("прошу взыскать задолженность 40000")
     assert spans
     assert spans[0].rubles == 40000
     assert spans[0].context
