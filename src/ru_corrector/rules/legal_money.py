@@ -79,10 +79,14 @@ MONEY_CONTEXTS: tuple[str, ...] = tuple(
             "взыскании суммы",
             "дополнительно оплатив",
             "уплаченные денежные средства",
+            "уплаченных денежных средств",
             "перечисленные денежные средства",
             "оплаченные денежные средства",
             "расходы на оплату услуг представителя",
+            "расходов на оплату услуг представителя",
             "расходы на оплату услуг юриста",
+            "расходов на оплату услуг юриста",
+            "компенсации морального вреда",
             "компенсацию морального вреда",
             "стоимость юридических услуг",
             "стоимость услуг",
@@ -114,18 +118,26 @@ MONEY_CONTEXTS: tuple[str, ...] = tuple(
             "оплату юридических услуг",
             "оплату юриста",
             "оплату юристу",
+            "процентов за пользование чужими денежными средствами",
             "проценты",
+            "проценты за пользование чужими денежными средствами",
+            "процентов",
             "неустойку",
+            "неустойки",
             "штрафную санкцию",
+            "штрафа",
             "штраф",
             "пени",
             "пеню",
             "компенсацию",
+            "компенсации",
             "убытками",
             "убытков",
             "убытки",
+            "ущерба",
             "ущерб",
             "расходы",
+            "расходов",
             "оплатив",
             "суммы",
             "сумма",
@@ -152,6 +164,20 @@ NO_V_RAZMERE_CONTEXTS: frozenset[str] = frozenset(
         "оплатив дополнительно",
         "дополнительно оплатив",
     }
+)
+
+MONEY_VERB_CONTEXTS: tuple[str, ...] = (
+    r"компенсировать",
+    r"взыскать",
+    r"вернуть",
+    r"оплатить",
+    r"выплатить",
+    r"возместить",
+    r"перечислить",
+    r"передать",
+    r"уплатить",
+    r"заплатить",
+    r"удержать",
 )
 
 AMOUNT_NUM_RX = r"(?:\d{1,3}(?:[ \t]\d{3})+|\d{4,12}|\d{1,3})"
@@ -270,7 +296,69 @@ def infer_money_amounts_from_context(text: str) -> str:
             flags=re.IGNORECASE,
         )
 
-    return t
+    return _infer_verb_money_amounts(t)
+
+
+def detect_verb_money_patterns(text: str) -> list[MoneySpan]:
+    """Detect verb-driven money mentions where amount follows verb within short window."""
+    spans: list[MoneySpan] = []
+    occupied: list[tuple[int, int]] = []
+    amount_rx = re.compile(
+        rf"(?<!\d)(?P<rub>{BARE_AMOUNT_RX})"
+        rf"(?P<marker>[ \t]*(?:руб|р)\.?(?![A-Za-zА-Яа-яЁё]))?"
+        rf"(?:[ \t]+(?P<kop>\d{{1,2}})[ \t]*коп\.?)?(?!\d)",
+        re.IGNORECASE,
+    )
+
+    def overlaps(start: int, end: int) -> bool:
+        return any(start < used_end and end > used_start for used_start, used_end in occupied)
+
+    for verb in MONEY_VERB_CONTEXTS:
+        for verb_match in re.finditer(rf"\b{verb}\b", text, flags=re.IGNORECASE):
+            window_end = min(len(text), verb_match.end() + 100)
+            window = text[verb_match.end() : window_end]
+            for amount_match in amount_rx.finditer(window):
+                start = verb_match.start()
+                end = verb_match.end() + amount_match.end()
+                amount_end = verb_match.end() + amount_match.end()
+                marker = amount_match.group("marker")
+                kop = amount_match.group("kop")
+
+                if overlaps(start, end):
+                    continue
+                if _already_decorated(text, amount_end):
+                    continue
+                if re.match(r"[ \t]*\(", text[amount_end:]):
+                    continue
+                if not marker and not kop and re.match(
+                    rf"[ \t]*{NON_MONEY_TAIL_RX}\b",
+                    text[amount_end:],
+                    flags=re.IGNORECASE,
+                ):
+                    continue
+
+                source = text[start:end]
+                context = source[: source.rfind(amount_match.group("rub"))].strip()
+                normalized_context = re.sub(r"[ \t]+", " ", context.lower())
+                spans.append(
+                    MoneySpan(
+                        start=start,
+                        end=end,
+                        rubles=_parse_amount(amount_match.group("rub")),
+                        kopecks=int(kop) if kop else None,
+                        context=context or None,
+                        has_currency_marker=bool(marker),
+                        needs_v_razmere=(
+                            "в размере" not in normalized_context
+                            and normalized_context not in NO_V_RAZMERE_CONTEXTS
+                        ),
+                        source=source,
+                    )
+                )
+                occupied.append((start, end))
+                break
+
+    return sorted(spans, key=lambda span: span.start)
 
 
 def detect_money_entities(text: str) -> list[MoneySpan]:
@@ -323,13 +411,46 @@ def detect_money_entities(text: str) -> list[MoneySpan]:
         for match in pattern.finditer(text):
             add(match, context=None, has_marker=True, needs_v_razmere=False)
 
+    for span in detect_verb_money_patterns(text):
+        if any(span.start < used_end and span.end > used_start for used_start, used_end in occupied):
+            continue
+        spans.append(span)
+        occupied.append((span.start, span.end))
+
     return sorted(spans, key=lambda span: span.start)
 
 
 def normalize_money(text: str) -> str:
     """Normalize money mentions and add 'в размере' for semantic legal contexts."""
-    context_normalized = _normalize_context_money(text)
+    marker_normalized = normalize_money_markers(text)
+    inferred = infer_money_amounts_from_context(marker_normalized)
+    context_normalized = _normalize_context_money(inferred)
     return _normalize_explicit_money(context_normalized)
+
+
+def _infer_verb_money_amounts(text: str) -> str:
+    spans = detect_verb_money_patterns(text)
+    if not spans:
+        return text
+
+    result: list[str] = []
+    cursor = 0
+    for span in spans:
+        if span.start < cursor:
+            continue
+        source = span.source
+        if not span.has_currency_marker:
+            source = re.sub(
+                rf"(?<!\d)({BARE_AMOUNT_RX})(?!\d)",
+                r"\1 руб",
+                source,
+                count=1,
+            )
+        result.append(text[cursor : span.start])
+        result.append(source)
+        cursor = span.end
+    result.append(text[cursor:])
+    return "".join(result)
 
 
 def _normalize_context_money(text: str) -> str:

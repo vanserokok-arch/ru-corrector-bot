@@ -76,6 +76,7 @@ class LegalPunctuationEngine:
 
     def apply(self, text: str) -> str:
         t = text
+        t = fix_semicolon_odnako(t)
         t = self._apply_comma_before_group(t, self.causal_phrases)
         t = re.sub(r"\bв случае[ \t]*,?[ \t]*если\b", "в случае, если", t, flags=re.I)
         t = self._apply_comma_before_group(t, self.condition_target_phrases)
@@ -94,7 +95,7 @@ class LegalPunctuationEngine:
         t = self._apply_enumeration_rules(t)
         t = self._apply_relative_rules(t)
         t = self._apply_cleanup_rules(t)
-        return t
+        return fix_ya_comma(t)
 
     @staticmethod
     def _apply_comma_before_group(text: str, phrases: tuple[str, ...]) -> str:
@@ -173,6 +174,18 @@ class LegalPunctuationEngine:
 
 
 _DEFAULT_ENGINE = LegalPunctuationEngine()
+
+
+def fix_ya_comma(text: str) -> str:
+    return re.sub(
+        r"(^|\n)(Я)\s+(?=[А-Яа-я])",
+        r"\1Я, ",
+        text,
+    )
+
+
+def fix_semicolon_odnako(text: str) -> str:
+    return re.sub(r";\s*(однако\b)", r", \1", text, flags=re.IGNORECASE)
 
 
 def apply_legal_punctuation(text: str) -> str:

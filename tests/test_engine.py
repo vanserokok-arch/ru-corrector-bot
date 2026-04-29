@@ -390,6 +390,19 @@ def test_legal_punctuation_stress_text():
     assert "в размере в размере" not in result
 
 
+def test_legal_punctuation_fix_ya_comma():
+    src = "Я заключил договор"
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+    assert result == "Я, заключил договор."
+
+
+def test_legal_punctuation_fix_semicolon_odnako():
+    src = "условия согласованы; однако исполнитель не исполнил обязательства"
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+    assert "условия согласованы, однако исполнитель не исполнил обязательства" in result.lower()
+    assert "; однако" not in result.lower()
+
+
 def test_legal_safe_subordinate_punctuation():
     src = (
         "пользователь столкнулся с утечкой персональных данных так как компания "
