@@ -1,5 +1,8 @@
 """Tests for reset correction engine architecture."""
 
+import pytest
+
+import ru_corrector.rules.legal as legal_rules
 from ru_corrector.core.engine import CorrectionEngine
 from ru_corrector.core.models import CorrectionResult
 from ru_corrector.providers.mock import MockProvider
@@ -8,6 +11,11 @@ from ru_corrector.rules.legal import apply_legal
 from ru_corrector.rules.strict import apply_strict
 from ru_corrector.rules.typo import apply_typo
 from tests.fixtures.legal_stress_cases import LEGAL_STRESS_EXPECTED, LEGAL_STRESS_RAW
+
+
+@pytest.fixture(autouse=True)
+def _disable_openai_refiner_by_default(monkeypatch):
+    monkeypatch.setattr(legal_rules.config, "ENABLE_OPENAI_REFINER", False)
 
 
 class _ErrProvider:
@@ -113,6 +121,64 @@ def test_legal_quotes_and_dash():
 
 def test_legal_hyphenated_word_unchanged():
     assert apply_legal("Северо-западный", provider=MockProvider([])) == "Северо-западный"
+
+
+def test_legal_protect_unprotect_roundtrip():
+    src = (
+        "Цена 3 200 000 (Три миллиона двести тысяч) рублей 25 (Двадцать пять) копеек "
+        "по договору от 12 апреля 2024 года, ст. 450 ГК РФ, № 123/2024."
+    )
+
+    protected, mapping = legal_rules.protect_legal_entities(src)
+
+    assert "__LEGAL_ENTITY_0__" in protected
+    assert mapping
+    assert legal_rules.unprotect_legal_entities(protected, mapping) == src
+
+
+def test_legal_rules_only_behavior_when_openai_refiner_disabled(monkeypatch):
+    monkeypatch.setattr(legal_rules.config, "ENABLE_OPENAI_REFINER", False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    src = "прошу взыскать сумму 3200000 руб по ст. 450 гк рф"
+
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+
+    assert result == (
+        "Прошу взыскать сумму в размере 3 200 000 (Три миллиона двести тысяч) рублей "
+        "по ст. 450 ГК РФ."
+    )
+    assert legal_rules.openai_refine("Текст без вызова OpenAI") == "Текст без вызова OpenAI"
+
+
+def test_legal_mocked_openai_refiner_restores_protected_entities(monkeypatch):
+    def fake_refine(text: str) -> str:
+        assert "__LEGAL_ENTITY_0__" in text
+        assert "3 200 000" not in text
+        return text.replace(
+            "номер __LEGAL_ENTITY_3__ ответчик",
+            "номер __LEGAL_ENTITY_3__, ответчик",
+        )
+
+    monkeypatch.setattr(legal_rules, "openai_refine", fake_refine)
+    src = (
+        "прошу взыскать сумму 3200000 руб 25 коп по ст. 450 гк рф "
+        "от 12.04.2024 номер № 123/2024 ответчик нарушил обязательства"
+    )
+
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+
+    assert (
+        "3 200 000 (Три миллиона двести тысяч) рублей 25 (Двадцать пять) копеек"
+        in result
+    )
+    assert "12 апреля 2024 года" in result
+    assert "ст. 450 ГК РФ" in result
+    assert "№ 123/2024" in result
+    assert "№ 123/2024, ответчик" in result
+    assert "__LEGAL_ENTITY_" not in result
+    assert ", ," not in result
+    assert " ." not in result
+    assert " ," not in result
 
 
 def test_strict_preserves_newlines_and_lists():
@@ -381,6 +447,124 @@ def test_legal_v_razmere_no_duplicate():
     src = "прошу взыскать неустойку в размере 7000 руб"
     result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
     assert "в размере в размере" not in result
+
+
+def test_legal_money_marker_normalizer_unit():
+    assert legal_rules._normalize_money_markers("200000 р. 50 коп.") == "200000 руб 50 коп"
+    assert legal_rules._normalize_money_markers("200000 руб.") == "200000 руб"
+
+
+def test_legal_money_context_inference_unit():
+    assert (
+        legal_rules._infer_money_amounts_from_context("денежные средства 120000 были перечислены")
+        == "денежные средства 120000 руб были перечислены"
+    )
+    assert (
+        legal_rules._infer_money_amounts_from_context(
+            "процентов за пользование чужими денежными средствами 120000 75 коп"
+        )
+        == "процентов за пользование чужими денежными средствами 120000 руб 75 коп"
+    )
+    assert legal_rules._infer_money_amounts_from_context("в срок 5 дней") == "в срок 5 дней"
+
+
+def test_legal_bare_money_amounts_from_context_cases():
+    cases = [
+        (
+            "денежные средства 120000 были перечислены",
+            "Денежные средства в размере 120 000 (Сто двадцать тысяч) рублей были перечислены.",
+        ),
+        (
+            "с иском о взыскании денежных средств 120000",
+            "С иском о взыскании денежных средств в размере 120 000 (Сто двадцать тысяч) рублей",
+        ),
+        (
+            "процентов за пользование чужими денежными средствами 120000 75 коп",
+            "Процентов за пользование чужими денежными средствами в размере "
+            "120 000 (Сто двадцать тысяч) рублей 75 (Семьдесят пять) копеек",
+        ),
+        (
+            "компенсацию морального вреда 30000",
+            "Компенсацию морального вреда в размере 30 000 (Тридцать тысяч) рублей",
+        ),
+        (
+            "расходы на оплату услуг представителя 40000",
+            "Расходы на оплату услуг представителя в размере 40 000 (Сорок тысяч) рублей",
+        ),
+        ("ст 10 гк рф", "ст. 10 ГК РФ"),
+        ("договор № B55-77/2023", "Договор № B55-77/2023"),
+        ("01.02.2023 г", "1 февраля 2023 года"),
+        (
+            "200000 р 50 коп",
+            "200 000 (Двести тысяч) рублей 50 (Пятьдесят) копеек",
+        ),
+    ]
+
+    for src, expected_fragment in cases:
+        result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+        assert expected_fragment in result
+        assert "в размере в размере" not in result
+
+    days_result = apply_legal("в срок 5 дней", provider=MockProvider([])).replace("\u00a0", " ")
+    assert "В срок 5 (Пять) дней." == days_result
+    assert "руб" not in days_result
+
+
+def test_legal_ap_14_2024_money_and_punctuation_regression():
+    src = (
+        "Я 10 марта 2024 года заключил с исполнителем договор на подготовку апелляционной жалобы и "
+        "представление интересов в суде; однако исполнитель свои обязательства не выполнил, так как жалоба "
+        "в суд подана не была, сроки обжалования были пропущены, а каких-либо доказательств работы мне не "
+        "предоставили.\n\n"
+        "Исполнитель сообщил, что документы уже готовы и якобы переданы юристу для подачи, но копию жалобы, "
+        "квитанцию об отправке и подтверждение направления документов в суд мне не направил.\n\n"
+        "За услуги мной была оплачена сумма 85 000 (Восемьдесят пять тысяч) рублей; однако фактически никакого "
+        "результата оказания услуг я не получил и в последующем был вынужден обратиться к другому представителю, "
+        "оплатив дополнительно 45000.\n\n"
+        "Считаю, что действия исполнителя нарушают ст. 309 ГК РФ, ст. 310 ГК РФ и ст. 15 ГК РФ, поскольку "
+        "обязательства должны исполняться надлежащим образом, а, причиненные мне убытки подлежат возмещению "
+        "в полном объёме.\n\n"
+        "В случае, если требования не будут удовлетворены добровольно, я буду вынужден обратиться в суд с иском "
+        "о взыскании уплаченных денежных средств в размере 85 000 (Восемьдесят пять тысяч) рублей, а также "
+        "убытков 45000 и процентов за пользование чужими денежными средствами в размере 85 000 "
+        "(Восемьдесят пять тысяч) рублей 35 (Тридцать пять) копеек за период с 10 марта 2024 года по "
+        "10 мая 2024 года.\n\n"
+        "Кроме того, прошу компенсировать моральный вред 60000, поскольку из-за бездействия исполнителя я "
+        "лишился возможности своевременно обжаловать судебный акт и понёс дополнительные расходы.\n\n"
+        "Прошу вернуть денежные средства в размере 85 000 (Восемьдесят пять тысяч) рублей, возместить убытки "
+        "в размере 45 000 (Сорок пять тысяч) рублей и направить письменный ответ по адресу, указанному в "
+        "договоре, в срок 7 (семь) дней с момента получения настоящей претензии.\n\n"
+        "Договор № AP-14/2024 был заключен 10 марта 2024 года; оплата подтверждается платежным поручением; "
+        "однако исполнитель до настоящего времени не предоставил отчётность и не сообщил, какие именно "
+        "действия были выполнены."
+    )
+
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+
+    expected_fragments = [
+        "сумма в размере 85 000 (Восемьдесят пять тысяч) рублей",
+        "оплатив дополнительно 45 000 (Сорок пять тысяч) рублей",
+        "убытков в размере 45 000 (Сорок пять тысяч) рублей",
+        "компенсировать моральный вред в размере 60 000 (Шестьдесят тысяч) рублей",
+        "денежными средствами в размере 85 000 (Восемьдесят пять тысяч) рублей "
+        "35 (Тридцать пять) копеек",
+        "Договор № AP-14/2024",
+        "ст. 309 ГК РФ",
+        "10 марта 2024 года",
+        "7 (семь) дней",
+    ]
+    for fragment in expected_fragments:
+        assert fragment in result
+
+    forbidden_fragments = [
+        "а, причиненные",
+        "а, причинённые",
+        "в размере в размере",
+        ", ,",
+        "что. В",
+    ]
+    for fragment in forbidden_fragments:
+        assert fragment not in result
 
 
 def test_legal_stress_big_text_extended():
