@@ -8,6 +8,7 @@ from ru_corrector.core.models import CorrectionResult
 from ru_corrector.providers.mock import MockProvider
 from ru_corrector.rules.base import apply_base
 from ru_corrector.rules.legal import apply_legal
+from ru_corrector.rules.legal_money import normalize_money
 from ru_corrector.rules.strict import apply_strict
 from ru_corrector.rules.typo import apply_typo
 from tests.fixtures.legal_stress_cases import LEGAL_STRESS_EXPECTED, LEGAL_STRESS_RAW
@@ -390,6 +391,19 @@ def test_legal_punctuation_stress_text():
     assert "в размере в размере" not in result
 
 
+def test_legal_punctuation_fix_ya_comma():
+    src = "Я заключил договор"
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+    assert result == "Я, заключил договор."
+
+
+def test_legal_punctuation_fix_semicolon_odnako():
+    src = "условия согласованы; однако исполнитель не исполнил обязательства"
+    result = apply_legal(src, provider=MockProvider([])).replace("\u00a0", " ")
+    assert "условия согласованы, однако исполнитель не исполнил обязательства" in result.lower()
+    assert "; однако" not in result.lower()
+
+
 def test_legal_safe_subordinate_punctuation():
     src = (
         "пользователь столкнулся с утечкой персональных данных так как компания "
@@ -466,6 +480,18 @@ def test_legal_money_context_inference_unit():
         == "процентов за пользование чужими денежными средствами 120000 руб 75 коп"
     )
     assert legal_rules._infer_money_amounts_from_context("в срок 5 дней") == "в срок 5 дней"
+
+
+def test_legal_money_pipeline_stage_order_for_verb_context():
+    src = "прошу взыскать задолженность 120000р 75 коп"
+    stage_1 = legal_rules._normalize_money_markers(src)
+    assert "120000 руб 75 коп" in stage_1
+    stage_2 = legal_rules._infer_money_amounts_from_context(stage_1)
+    assert stage_2.count("120000 руб 75 коп") == 1
+    assert (
+        normalize_money(src)
+        == "прошу взыскать задолженность 120 000 (Сто двадцать тысяч) рублей 75 (Семьдесят пять) копеек"
+    )
 
 
 def test_legal_bare_money_amounts_from_context_cases():
